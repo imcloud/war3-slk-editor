@@ -1,0 +1,7 @@
+.vscode
+.vscode/*.*
+out
+out/*
+node_modules
+node_modules/*
+*.vsix

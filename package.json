@@ -1,0 +1,40 @@
+{
+  "name": "war3-slk-editor",
+  "publisher": "sean",
+  "displayName": "Warcraft III SLK Editor",
+  "description": "Visual spreadsheet editor for Warcraft III map .slk files",
+  "version": "1.0.0",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "customEditors": [
+      {
+        "viewType": "war3.slkEditor",
+        "displayName": "WAR3 SLK编辑器",
+        "selector": [
+          {
+            "filenamePattern": "*.slk"
+          }
+        ],
+        "priority": "default"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^18.x",
+    "@types/vscode": "^1.75.0",
+    "typescript": "^5.0.0"
+  }
+}
