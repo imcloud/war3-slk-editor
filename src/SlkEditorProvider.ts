@@ -28,6 +28,27 @@ export class SlkEditorProvider implements vscode.CustomTextEditorProvider {
 
     let isSaving = false; // 加一把锁，防止自己保存触发的文档变动反向触发 updateWebview 导致冲刷
 
+    const encItem = vscode.window.createStatusBarItem(
+      vscode.StatusBarAlignment.Right,
+      100
+    );
+
+    const updateEncodingItem = () => {
+      const enc = vscode.workspace
+        .getConfiguration('files', document.uri)
+        .get<string>('encoding') || 'utf8';
+      encItem.text = `$(file-code) ${enc.toUpperCase()}`;
+      encItem.tooltip = `保存时使用编码：${enc}`;
+      encItem.show();
+    };
+
+    updateEncodingItem();
+
+    // 配置变化时刷新
+    const cfgSub = vscode.workspace.onDidChangeConfiguration(e => {
+      if (e.affectsConfiguration('files.encoding')) updateEncodingItem();
+    });
+
     const updateWebview = () => {
       if (isSaving) return; // 如果正在保存，直接忽略文档变动事件，防止回流覆盖
       try {
@@ -70,8 +91,18 @@ export class SlkEditorProvider implements vscode.CustomTextEditorProvider {
       }
     });
 
+    webviewPanel.onDidChangeViewState(e => {
+      if (e.webviewPanel.active) {
+        encItem.show();
+      } else {
+        encItem.hide();
+      }
+    });
+
     webviewPanel.onDidDispose(() => {
       changeDocumentSubscription.dispose();
+      encItem.dispose();
+      cfgSub.dispose();
     });
   }
 
