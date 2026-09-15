@@ -1,0 +1,161 @@
+html, body {
+  height: 100%; width: 100%; margin: 0; padding: 0;
+  overflow: hidden; box-sizing: border-box;
+}
+*, *::before, *::after { box-sizing: inherit; }
+
+body {
+  display: flex; flex-direction: column;
+  background: var(--vscode-editor-background, #1e1e1e);
+  color: var(--vscode-editor-foreground, #ccc);
+  font-family: var(--vscode-font-family, sans-serif);
+  font-size: 13px;
+}
+
+/* ---------- 工具栏（你的原样保留） ---------- */
+#toolbar {
+  height: 35px; min-height: 35px; padding: 0 10px;
+  display: flex; gap: 8px; align-items: center; flex-shrink: 0;
+  background: var(--vscode-editorWidget-background, #252526);
+  border-bottom: 1px solid var(--vscode-widget-border, #454545);
+}
+#toolbar input[type="text"] {
+  height: 24px; line-height: 24px; outline: none;
+  background: var(--vscode-input-background, #3c3c3c);
+  color: var(--vscode-input-foreground, #ccc);
+  border: 1px solid var(--vscode-input-border, #555);
+  padding: 0 8px; border-radius: 2px; font-size: 12px;
+}
+#info { margin-left: 10px; font-size: 12px; color: var(--vscode-descriptionForeground, #888); }
+button {
+  background: var(--vscode-button-background, #0e639c);
+  color: var(--vscode-button-foreground, #fff);
+  border: none; padding: 4px 10px; cursor: pointer;
+  border-radius: 2px; height: 24px; font-size: 12px;
+}
+button:hover { background: var(--vscode-button-hoverBackground, #1177bb); }
+
+/* ---------- 布局 ---------- */
+html, body, #body-container { overflow-anchor: none; }
+
+#grid-wrapper { flex: 1; position: relative; min-height: 0; }
+
+#body-container {
+  position: absolute; inset: 0; overflow: auto;
+  contain: layout style paint;
+}
+
+.header-sticky {
+  position: sticky; top: 0; z-index: 100;
+  width: max-content; min-width: 100%;
+  background: var(--vscode-editorHeader-background, #2d2d2d);
+  border-bottom: 1px solid var(--vscode-panel-border, #333);
+}
+
+#rows-area {
+  position: relative;
+  width: max-content; min-width: 100%;
+}
+
+/* 撑滚动条 */
+#phantom {
+  position: absolute; top: 0; left: 0;
+  width: 1px; pointer-events: none;
+}
+
+#rows-layer {
+  position: absolute; top: 0; left: 0;
+  will-change: transform;
+}
+
+/* ---------- 行/单元格 ---------- */
+.header-row,
+.data-row {
+  display: flex;
+  height: 27px;
+  width: max-content;
+}
+.data-row { position: absolute; left: 0; }
+
+.cell-num, .cell {
+  flex: 0 0 auto;
+  height: 27px;
+  padding: 0 6px;
+  line-height: 27px;
+  border-right: 1px solid var(--vscode-panel-border, #333);
+  border-bottom: 1px solid var(--vscode-panel-border, #333);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  user-select: none;
+}
+
+.cell-num {
+  width: 60px; flex-basis: 60px;
+  text-align: center;
+  background: var(--vscode-editorHeader-background, #2d2d2d);
+}
+
+.cell { width: 150px; flex-basis: 150px; }
+
+.cell-num.col-collapsed,
+.cell.col-collapsed {
+  width: 44px;
+  flex-basis: 44px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: visible;
+}
+.cell-num.col-collapsed > span,
+.cell.col-collapsed > span {
+  display: none;
+}
+.cell-num.col-collapsed .col-toggle-btn,
+.cell.col-collapsed .col-toggle-btn {
+  float: none;
+  margin: 0;
+  height: 20px;
+  padding: 0 4px;
+  font-size: 11px;
+}
+
+.header-row .cell,
+.header-row .cell-num {
+  font-weight: bold;
+  background: var(--vscode-editorHeader-background, #2d2d2d);
+}
+
+.cell.cell-selected {
+  outline: 2px solid var(--vscode-focusBorder, #007acc);
+  outline-offset: -2px;
+  background: var(--vscode-editor-findMatchHighlightBackground, rgba(81,92,107,0.4));
+}
+
+.cell input.cell-editor {
+  width: 100%; height: 100%; padding: 0 4px;
+  border: none; outline: none;
+  background: var(--vscode-input-background, #3c3c3c);
+  color: var(--vscode-input-foreground, #ccc);
+  font-family: inherit; font-size: inherit;
+}
+
+.col-toggle-btn {
+  background: transparent;
+  border: 1px solid var(--vscode-widget-border, #555);
+  color: var(--vscode-editor-foreground, #ccc);
+  cursor: pointer; font-size: 10px;
+  padding: 0 3px; height: 18px; border-radius: 2px;
+  float: right; margin-top: 3px;
+}
+.col-toggle-btn:hover { background: var(--vscode-button-hoverBackground, #444); color: #fff; }
+
+#error-box {
+  display: none;
+  position: absolute; inset: 0;
+  padding: 20px; z-index: 9999;
+  background: rgba(180,0,0,0.9);
+  color: #fff; font-size: 14px;
+  white-space: pre-wrap;
+}
