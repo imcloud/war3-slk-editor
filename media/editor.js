@@ -211,6 +211,9 @@ window.addEventListener('error', (err) => {
   window.addEventListener('message', (event) => {
     const msg = event.data;
     if (msg.type === 'load') {
+      const prevSelected = { ...selectedCell };
+      const prevScrollTop = bodyContainer ? bodyContainer.scrollTop : 0;
+
       rows = msg.data.rows || [];
       maxCols = msg.data.maxCols || 0;
 
@@ -219,10 +222,20 @@ window.addEventListener('error', (err) => {
       poolColCount = -1;
       lastStartIdx = -1;
       editingCell = null;
-      selectedCell = { r: 1, c: 0 };
+
+      // 恢复选中位置（夹紧到有效范围）
+      const maxR = Math.max(1, rows.length - 1);
+      const maxC = Math.max(0, maxCols - 1);
+      selectedCell = {
+        r: Math.min(Math.max(1, prevSelected.r), maxR),
+        c: Math.min(Math.max(0, prevSelected.c), maxC),
+      };
 
       renderHeader();
-      updateFilter(true);
+      updateFilter(false);   // ← 原来是 true，会强制滚回顶部
+
+      // 恢复滚动位置
+      if (bodyContainer) bodyContainer.scrollTop = prevScrollTop;
     }
   });
 
@@ -386,7 +399,7 @@ window.addEventListener('error', (err) => {
 
   // ===== 宿主通信 =====
   function notifyChange() {
-    vscode.postMessage({ type: 'saveData', rows });
+    // vscode.postMessage({ type: 'saveData', rows });
     updateInfo();
   }
 
@@ -491,6 +504,15 @@ window.addEventListener('error', (err) => {
     updateVirtualScroll(true);
     notifyChange();
   };
+
+  document.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+      e.preventDefault();
+      e.stopPropagation();
+      commitEditing();   // 先提交正在编辑的格子
+      vscode.postMessage({ type: 'saveData', rows });
+    }
+  }, true);   // capture 阶段拦截，保证在 input 冒泡前生效
 
   vscode.postMessage({ type: 'ready' });
 })();

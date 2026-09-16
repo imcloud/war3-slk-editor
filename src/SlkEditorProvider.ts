@@ -1,8 +1,11 @@
 import * as vscode from 'vscode';
-import { parseSLK, stringifySLK } from './slkParser';
+import { parseSLK, stringifySLK, SlkData } from './slkParser';
 
 export class SlkEditorProvider implements vscode.CustomTextEditorProvider {
   public static readonly viewType = 'war3.slkEditor';
+
+  // 每个文档的解析元数据（cellMap、headerLines、bRecord、tailLines 等）
+  private documentMetadata = new Map<string, SlkData>();
 
   public static register(context: vscode.ExtensionContext): vscode.Disposable {
     return vscode.window.registerCustomEditorProvider(
@@ -19,6 +22,8 @@ export class SlkEditorProvider implements vscode.CustomTextEditorProvider {
     webviewPanel: vscode.WebviewPanel,
     _token: vscode.CancellationToken
   ): Promise<void> {
+    const docUriStr = document.uri.toString();
+
     webviewPanel.webview.options = {
       enableScripts: true,
       localResourceRoots: [vscode.Uri.joinPath(this.context.extensionUri, 'media')]
@@ -26,13 +31,11 @@ export class SlkEditorProvider implements vscode.CustomTextEditorProvider {
 
     webviewPanel.webview.html = this.getHtmlForWebview(webviewPanel.webview);
 
-    let isSaving = false; // 加一把锁，防止自己保存触发的文档变动反向触发 updateWebview 导致冲刷
+    // 时间窗口：保存期间忽略 applyEdit 触发的文档变动，避免位置跳
+    let suppressDocChangeUntil = 0;
 
-    const encItem = vscode.window.createStatusBarItem(
-      vscode.StatusBarAlignment.Right,
-      100
-    );
-
+    // 状态栏：保存编码
+    const encItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
     const updateEncodingItem = () => {
       const enc = vscode.workspace
         .getConfiguration('files', document.uri)
@@ -41,27 +44,23 @@ export class SlkEditorProvider implements vscode.CustomTextEditorProvider {
       encItem.tooltip = `保存时使用编码：${enc}`;
       encItem.show();
     };
-
     updateEncodingItem();
-
-    // 配置变化时刷新
     const cfgSub = vscode.workspace.onDidChangeConfiguration(e => {
       if (e.affectsConfiguration('files.encoding')) updateEncodingItem();
     });
 
     const updateWebview = () => {
-      if (isSaving) return; // 如果正在保存，直接忽略文档变动事件，防止回流覆盖
+      if (Date.now() < suppressDocChangeUntil) return;
       try {
         const text = document.getText();
         const slkData = parseSLK(text);
-        webviewPanel.webview.postMessage({
-          type: 'load',
-          data: slkData
-        });
+        // ★ 缓存解析元数据，保存时回传做语义保留
+        this.documentMetadata.set(docUriStr, slkData);
+        webviewPanel.webview.postMessage({ type: 'load', data: slkData });
       } catch (err: any) {
         webviewPanel.webview.postMessage({
           type: 'error',
-          message: 'SLK 解析异常: ' + (err.message || err)
+          message: 'SLK 解析异常: ' + (err?.message || err)
         });
       }
     };
@@ -71,50 +70,55 @@ export class SlkEditorProvider implements vscode.CustomTextEditorProvider {
         case 'ready':
           updateWebview();
           return;
+
         case 'saveData':
-          isSaving = true;
+          suppressDocChangeUntil = Date.now() + 500;
           try {
-            await this.updateTextDocument(document, e.rows);
-          } finally {
-            // 稍等一小段时间再释放锁，确保文档事件稳定
-            setTimeout(() => {
-              isSaving = false;
-            }, 300);
+            // ★ 取出缓存的 meta，让 stringifySLK 做语义保留
+            const meta = this.documentMetadata.get(docUriStr);
+            await this.updateTextDocument(document, e.rows, meta);
+            await document.save();
+          } catch (err: any) {
+            webviewPanel.webview.postMessage({
+              type: 'error',
+              message: '保存失败: ' + (err?.message || err)
+            });
           }
           return;
       }
     });
 
     const changeDocumentSubscription = vscode.workspace.onDidChangeTextDocument(e => {
-      if (e.document.uri.toString() === document.uri.toString()) {
-        updateWebview();
-      }
+      if (e.document.uri.toString() === docUriStr) updateWebview();
     });
 
     webviewPanel.onDidChangeViewState(e => {
-      if (e.webviewPanel.active) {
-        encItem.show();
-      } else {
-        encItem.hide();
-      }
+      if (e.webviewPanel.active) encItem.show();
+      else encItem.hide();
     });
 
     webviewPanel.onDidDispose(() => {
       changeDocumentSubscription.dispose();
       encItem.dispose();
       cfgSub.dispose();
+      // ★ 清理缓存，避免内存泄漏
+      this.documentMetadata.delete(docUriStr);
     });
   }
 
-  private updateTextDocument(document: vscode.TextDocument, rows: string[][]) {
-    const newContent = stringifySLK(rows);
+  private async updateTextDocument(
+    document: vscode.TextDocument,
+    rows: string[][],
+    meta?: SlkData
+  ): Promise<void> {
+    const newContent = stringifySLK(rows, meta);
     const edit = new vscode.WorkspaceEdit();
     const fullRange = new vscode.Range(
       document.positionAt(0),
       document.positionAt(document.getText().length)
     );
     edit.replace(document.uri, fullRange, newContent);
-    return vscode.workspace.applyEdit(edit);
+    await vscode.workspace.applyEdit(edit);
   }
 
   private getHtmlForWebview(webview: vscode.Webview): string {
@@ -172,8 +176,6 @@ export class SlkEditorProvider implements vscode.CustomTextEditorProvider {
 function getNonce() {
   let text = '';
   const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  for (let i = 0; i < 32; i++) {
-    text += possible.charAt(Math.floor(Math.random() * possible.length));
-  }
+  for (let i = 0; i < 32; i++) text += possible.charAt(Math.floor(Math.random() * possible.length));
   return text;
 }

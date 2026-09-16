@@ -3,6 +3,9 @@ export interface SlkCellMeta {
   fHasY: boolean;
   fHasX: boolean;
   fExtra: string;
+  fOrigY?: number;      // ★ 新增
+  fOrigX?: number;      // ★ 新增
+  rawF?: string;        // ★ 新增：原始 F 行文本
 
   hasC: boolean;
   cHasY: boolean;
@@ -71,11 +74,23 @@ export function parseSLK(content: string): SlkData {
 
     // 头部区
     if (phase === 'header') {
-      if (trimmed.startsWith('C;') || trimmed.startsWith('F;')) {
+      if (trimmed.startsWith('C;')) {
         phase = 'body';
-      } else if (trimmed.startsWith('B;')) {
-        bRecord = line;
-        continue;
+      } else if (trimmed.startsWith('F;')) {
+        // 检查是否有 X 或 Y
+        const tokens = parseSlkLineFields(trimmed);
+        let hasCoord = false;
+        for (let j = 1; j < tokens.length; j++) {
+          const t = tokens[j];
+          if (!t) continue;
+          if (t[0] === 'X' || t[0] === 'Y') { hasCoord = true; break; }
+        }
+        if (hasCoord) {
+          phase = 'body';
+        } else {
+          headerLines.push(line);   // ★ 无 X/Y → 留 header
+          continue;
+        }
       } else if (trimmed === 'E' || trimmed.startsWith('E;')) {
         phase = 'tail';
         tailLines.push(line);
@@ -104,6 +119,19 @@ export function parseSLK(content: string): SlkData {
       if (trimmed.startsWith('F;') || trimmed.startsWith('C;')) {
         const tokens = parseSlkLineFields(trimmed);
         const recType = tokens[0];
+
+        if (recType === 'F') {
+          let hasXY = false;
+          for (let j = 1; j < tokens.length; j++) {
+            const t = tokens[j];
+            if (!t) continue;
+            if (t[0] === 'X' || t[0] === 'Y') { hasXY = true; break; }
+          }
+          if (!hasXY) {
+            bodyExtraLines.push(line);
+            continue;
+          }
+        }
 
         let recordY: number | null = null;
         let recordX: number | null = null;
@@ -151,6 +179,11 @@ export function parseSLK(content: string): SlkData {
         const extraStr = extraFields.length > 0 ? ';' + extraFields.join(';') : '';
 
         if (recType === 'F') {
+          if (!meta.hasF) {                    // ★ 只保留第一条 F
+            meta.rawF = trimmed;
+            meta.fOrigY = recordY ?? undefined;
+            meta.fOrigX = recordX ?? undefined;
+          }
           meta.hasF = true;
           meta.fHasY = yTag;
           meta.fHasX = xTag;
@@ -242,7 +275,19 @@ export function stringifySLK(rows: string[][], meta?: SlkData): string {
 
   // 1. 头部
   if (meta?.headerLines) {
-    lines.push(...meta.headerLines);
+    for (const h of meta.headerLines) {
+      const ht = h.trimStart();
+      if (ht.startsWith('B;')) {
+        let newB = h;
+        if (/Y\d+/.test(newB)) newB = newB.replace(/Y\d+/, `Y${maxRows}`);
+        else newB += `;Y${maxRows}`;
+        if (/X\d+/.test(newB)) newB = newB.replace(/X\d+/, `X${maxCols}`);
+        else newB += `;X${maxCols}`;
+        lines.push(newB);
+      } else {
+        lines.push(h);
+      }
+    }
   } else {
     lines.push('ID;PWXL;N;E');
   }
@@ -255,8 +300,6 @@ export function stringifySLK(rows: string[][], meta?: SlkData): string {
     if (/X\d+/.test(newB)) newB = newB.replace(/X\d+/, `X${maxCols}`);
     else newB += `;X${maxCols}`;
     lines.push(newB);
-  } else {
-    lines.push(`B;Y${maxRows};X${maxCols};D0`);
   }
 
   // ★ 3. body 阶段的 P/O 记录（保留，放在数据之前）
@@ -284,20 +327,32 @@ export function stringifySLK(rows: string[][], meta?: SlkData): string {
       const tgtX = x + 1;
 
       if (cellMeta?.hasF) {
-        let out = 'F';
-        const needY = cellMeta.fHasY || (structureChanged && currentY !== tgtY);
-        if (needY) {
-          out += `;Y${tgtY}`;
+        const canReuseF =
+          cellMeta.rawF !== undefined &&
+          cellMeta.fHasY && cellMeta.fHasX &&
+          cellMeta.fOrigY === tgtY &&
+          cellMeta.fOrigX === tgtX;
+
+        if (canReuseF) {
+          lines.push(cellMeta.rawF!);
           currentY = tgtY;
-          currentX = 1;
-        }
-        const needX = cellMeta.fHasX || (structureChanged && currentX !== tgtX);
-        if (needX) {
-          out += `;X${tgtX}`;
           currentX = tgtX;
+        } else {
+          let out = 'F';
+          if (cellMeta.fExtra) out += cellMeta.fExtra;
+          const needY = cellMeta.fHasY || (structureChanged && currentY !== tgtY);
+          if (needY) {
+            out += `;Y${tgtY}`;
+            currentY = tgtY;
+            currentX = 1;
+          }
+          const needX = cellMeta.fHasX || (structureChanged && currentX !== tgtX);
+          if (needX) {
+            out += `;X${tgtX}`;
+            currentX = tgtX;
+          }
+          lines.push(out);
         }
-        out += cellMeta.fExtra;
-        lines.push(out);
       }
 
       if (!isEmpty) {
