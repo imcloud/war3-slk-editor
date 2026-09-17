@@ -94,6 +94,9 @@ html, body, #body-container { overflow-anchor: none; }
   width: 60px; flex-basis: 60px;
   text-align: center;
   background: var(--vscode-editorHeader-background, #2d2d2d);
+  position: sticky;
+  left: 0;
+  z-index: 5;
 }
 
 .cell { width: 150px; flex-basis: 150px; }
@@ -161,7 +164,11 @@ html, body, #body-container { overflow-anchor: none; }
 }
 
 .cell-num.row-selected {
-  background: var(--vscode-editor-findMatchHighlightBackground, rgba(81,92,107,0.4));
+  background-color: var(--vscode-editorHeader-background, #2d2d2d);
+  background-image: linear-gradient(
+    var(--vscode-editor-findMatchHighlightBackground, rgba(81,92,107,0.4)),
+    var(--vscode-editor-findMatchHighlightBackground, rgba(81,92,107,0.4))
+  );
   color: var(--vscode-editor-foreground, #ccc);
   font-weight: bold;
 }
