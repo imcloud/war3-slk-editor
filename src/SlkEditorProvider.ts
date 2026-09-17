@@ -4,7 +4,6 @@ import { parseSLK, stringifySLK, SlkData } from './slkParser';
 export class SlkEditorProvider implements vscode.CustomTextEditorProvider {
   public static readonly viewType = 'war3.slkEditor';
 
-  // 每个文档的解析元数据（cellMap、headerLines、bRecord、tailLines 等）
   private documentMetadata = new Map<string, SlkData>();
 
   public static register(context: vscode.ExtensionContext): vscode.Disposable {
@@ -31,10 +30,8 @@ export class SlkEditorProvider implements vscode.CustomTextEditorProvider {
 
     webviewPanel.webview.html = this.getHtmlForWebview(webviewPanel.webview);
 
-    // 时间窗口：保存期间忽略 applyEdit 触发的文档变动，避免位置跳
     let suppressDocChangeUntil = 0;
 
-    // 状态栏：保存编码
     const encItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
     const updateEncodingItem = () => {
       const enc = vscode.workspace
@@ -54,7 +51,6 @@ export class SlkEditorProvider implements vscode.CustomTextEditorProvider {
       try {
         const text = document.getText();
         const slkData = parseSLK(text);
-        // ★ 缓存解析元数据，保存时回传做语义保留
         this.documentMetadata.set(docUriStr, slkData);
         webviewPanel.webview.postMessage({ type: 'load', data: slkData });
       } catch (err: any) {
@@ -71,12 +67,25 @@ export class SlkEditorProvider implements vscode.CustomTextEditorProvider {
           updateWebview();
           return;
 
-        case 'saveData':
+        case 'contentChanged':
           suppressDocChangeUntil = Date.now() + 500;
           try {
-            // ★ 取出缓存的 meta，让 stringifySLK 做语义保留
             const meta = this.documentMetadata.get(docUriStr);
-            await this.updateTextDocument(document, e.rows, meta);
+            // ★ 透传 rowOrigIdx；不重新 parse（保留语义基准）
+            await this.updateTextDocument(document, e.rows, meta, e.rowOrigIdx);
+          } catch (err: any) {
+            webviewPanel.webview.postMessage({
+              type: 'error',
+              message: '应用修改失败: ' + (err?.message || err)
+            });
+          }
+          return;
+
+        case 'save':
+          suppressDocChangeUntil = Date.now() + 500;
+          try {
+            const meta = this.documentMetadata.get(docUriStr);
+            await this.updateTextDocument(document, e.rows, meta, e.rowOrigIdx);
             await document.save();
           } catch (err: any) {
             webviewPanel.webview.postMessage({
@@ -101,7 +110,6 @@ export class SlkEditorProvider implements vscode.CustomTextEditorProvider {
       changeDocumentSubscription.dispose();
       encItem.dispose();
       cfgSub.dispose();
-      // ★ 清理缓存，避免内存泄漏
       this.documentMetadata.delete(docUriStr);
     });
   }
@@ -109,9 +117,10 @@ export class SlkEditorProvider implements vscode.CustomTextEditorProvider {
   private async updateTextDocument(
     document: vscode.TextDocument,
     rows: string[][],
-    meta?: SlkData
+    meta?: SlkData,
+    rowOrigIdx?: number[]
   ): Promise<void> {
-    const newContent = stringifySLK(rows, meta);
+    const newContent = stringifySLK(rows, meta, rowOrigIdx);
     const edit = new vscode.WorkspaceEdit();
     const fullRange = new vscode.Range(
       document.positionAt(0),

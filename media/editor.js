@@ -17,6 +17,7 @@ window.addEventListener('error', (err) => {
   const NUM_WIDTH_COLLAPSED = 44;
 
   let rows = [];
+  let rowOrigIdx = [];
   let maxCols = 0;
   let selectedCell = { r: 1, c: 0 };
   let editingCell = null;
@@ -25,8 +26,9 @@ window.addEventListener('error', (err) => {
   let lastStartIdx = -1;
   let isTicking = false;
 
-  let rowPool = [];         // [{ el, cellNum, cells, currentR }]
+  let rowPool = [];
   let poolColCount = -1;
+  let changeTimer = null;
 
   const getEl = (id) => document.getElementById(id);
   const bodyContainer = getEl('body-container');
@@ -36,7 +38,6 @@ window.addEventListener('error', (err) => {
   const infoSpan = getEl('info');
   const searchInput = getEl('search-input');
 
-  // ===== 宽度 =====
   function numWidth() { return collapsedCols[-1] ? NUM_WIDTH_COLLAPSED : NUM_WIDTH; }
   function cellWidth(c) { return collapsedCols[c] ? CELL_WIDTH_COLLAPSED : CELL_WIDTH; }
   function totalWidth() {
@@ -45,10 +46,8 @@ window.addEventListener('error', (err) => {
     return w;
   }
 
-  // ===== 表头 =====
   function renderHeader() {
     headerRow.innerHTML = '';
-
     const thNum = document.createElement('div');
     thNum.className = 'cell-num';
     const spanNum = document.createElement('span');
@@ -61,14 +60,12 @@ window.addEventListener('error', (err) => {
       const th = document.createElement('div');
       th.className = 'cell';
       if (collapsedCols[c]) th.classList.add('col-collapsed');
-
       if (!collapsedCols[c]) {
         const name = (firstRow[c] !== undefined && firstRow[c] !== '') ? firstRow[c] : `第 ${c + 1} 列`;
         const spanText = document.createElement('span');
         spanText.textContent = name;
         th.appendChild(spanText);
       }
-
       const toggleBtn = document.createElement('button');
       toggleBtn.className = 'col-toggle-btn';
       toggleBtn.textContent = collapsedCols[c] ? '»' : '«';
@@ -85,15 +82,12 @@ window.addEventListener('error', (err) => {
     updateVirtualScroll(true);
   }
 
-  // ===== 池 =====
   function createDataRow() {
     const el = document.createElement('div');
     el.className = 'data-row';
-
     const cellNum = document.createElement('div');
     cellNum.className = 'cell-num';
     el.appendChild(cellNum);
-
     const cells = [];
     for (let c = 0; c < maxCols; c++) {
       const cell = document.createElement('div');
@@ -101,12 +95,10 @@ window.addEventListener('error', (err) => {
       el.appendChild(cell);
       cells.push(cell);
     }
-
     return { el, cellNum, cells, currentR: null };
   }
 
   function ensurePool(targetCount) {
-    // 列数变化时重建
     if (poolColCount !== maxCols) {
       rowsLayer.innerHTML = '';
       rowPool = [];
@@ -126,7 +118,6 @@ window.addEventListener('error', (err) => {
     }
   }
 
-  // ===== 过滤 =====
   function updateFilter(resetScroll = false) {
     const kw = searchInput ? searchInput.value.trim().toLowerCase() : '';
     const oldTop = bodyContainer ? bodyContainer.scrollTop : 0;
@@ -159,7 +150,6 @@ window.addEventListener('error', (err) => {
     if (bodyContainer) bodyContainer.scrollTop = resetScroll ? 0 : oldTop;
   }
 
-  // ===== 编辑 =====
   function commitEditing() {
     if (!editingCell) return;
     const input = rowsLayer.querySelector('input.cell-editor');
@@ -195,7 +185,7 @@ window.addEventListener('error', (err) => {
           selectedCell.r = filteredIndices[idx + 1];
           updateSelectedClass();
           updateInfo();
-          scrollToRowIndex(selectedCell.r);
+          ensureRowVisible(selectedCell.r);
         }
       } else if (e.key === 'Escape') {
         editingCell = null;
@@ -207,7 +197,6 @@ window.addEventListener('error', (err) => {
     input.select();
   }
 
-  // ===== 消息 =====
   window.addEventListener('message', (event) => {
     const msg = event.data;
     if (msg.type === 'load') {
@@ -215,6 +204,7 @@ window.addEventListener('error', (err) => {
       const prevScrollTop = bodyContainer ? bodyContainer.scrollTop : 0;
 
       rows = msg.data.rows || [];
+      rowOrigIdx = rows.map((_, i) => i);
       maxCols = msg.data.maxCols || 0;
 
       rowsLayer.innerHTML = '';
@@ -223,7 +213,6 @@ window.addEventListener('error', (err) => {
       lastStartIdx = -1;
       editingCell = null;
 
-      // 恢复选中位置（夹紧到有效范围）
       const maxR = Math.max(1, rows.length - 1);
       const maxC = Math.max(0, maxCols - 1);
       selectedCell = {
@@ -232,14 +221,11 @@ window.addEventListener('error', (err) => {
       };
 
       renderHeader();
-      updateFilter(false);   // ← 原来是 true，会强制滚回顶部
-
-      // 恢复滚动位置
+      updateFilter(false);
       if (bodyContainer) bodyContainer.scrollTop = prevScrollTop;
     }
   });
 
-  // ===== 虚拟滚动 =====
   function updateVirtualScroll(force = false) {
     if (!bodyContainer || !rowsLayer) return;
 
@@ -257,13 +243,11 @@ window.addEventListener('error', (err) => {
     const targetCount = Math.max(0, endIdx - startIdx);
     ensurePool(targetCount);
 
-    // phantom 尺寸
     const totalH = dataCount * ROW_HEIGHT;
     if (phantom.style.height !== totalH + 'px') phantom.style.height = totalH + 'px';
     const totalW = totalWidth();
     if (phantom.style.width !== totalW + 'px') phantom.style.width = totalW + 'px';
 
-    // rows-layer 整体位移，池内行的 top 不变
     rowsLayer.style.transform = `translateY(${startIdx * ROW_HEIGHT}px)`;
 
     if (force) for (const r of rowPool) r.currentR = null;
@@ -341,13 +325,17 @@ window.addEventListener('error', (err) => {
     }
   }
 
-  function scrollToRowIndex(realRowIdx) {
+  function ensureRowVisible(realRowIdx) {
     const fi = filteredIndices.indexOf(realRowIdx);
     if (fi === -1) return;
-    bodyContainer.scrollTop = fi * ROW_HEIGHT;
+    const top = fi * ROW_HEIGHT;
+    const bottom = top + ROW_HEIGHT;
+    const viewTop = bodyContainer.scrollTop;
+    const viewBottom = viewTop + bodyContainer.clientHeight;
+    if (top < viewTop) bodyContainer.scrollTop = top;
+    else if (bottom > viewBottom) bodyContainer.scrollTop = bottom - bodyContainer.clientHeight;
   }
 
-  // ===== 事件 =====
   if (searchInput) {
     searchInput.disabled = false;
     searchInput.addEventListener('input', () => {
@@ -356,6 +344,7 @@ window.addEventListener('error', (err) => {
     });
   }
 
+  // ===== 单击选中 / 双击编辑 =====
   if (rowsLayer) {
     rowsLayer.addEventListener('click', (e) => {
       const cell = e.target.closest('.cell');
@@ -363,12 +352,12 @@ window.addEventListener('error', (err) => {
       const r = parseInt(cell.dataset.r, 10);
       const c = parseInt(cell.dataset.c, 10);
       if (isNaN(r) || isNaN(c)) return;
-      if (selectedCell.r !== r || selectedCell.c !== c) {
-        commitEditing();
-        selectedCell = { r, c };
-        updateSelectedClass();
-        updateInfo();
-      }
+
+      commitEditing();
+      selectedCell = { r, c };
+      updateSelectedClass();
+      updateInfo();
+      // 不进入编辑
     });
 
     rowsLayer.addEventListener('dblclick', (e) => {
@@ -376,7 +365,12 @@ window.addEventListener('error', (err) => {
       if (!cell) return;
       const r = parseInt(cell.dataset.r, 10);
       const c = parseInt(cell.dataset.c, 10);
-      if (!isNaN(r) && !isNaN(c)) startEditing(cell, r, c);
+      if (isNaN(r) || isNaN(c)) return;
+
+      selectedCell = { r, c };
+      updateSelectedClass();
+      updateInfo();
+      startEditing(cell, r, c);
     });
   }
 
@@ -397,10 +391,223 @@ window.addEventListener('error', (err) => {
     updateVirtualScroll(true);
   });
 
-  // ===== 宿主通信 =====
+  // ===== 单元格复制/剪切/粘贴/清空的公共逻辑 =====
+  function getSelectedValue() {
+    const r = selectedCell.r, c = selectedCell.c;
+    return (rows[r] && rows[r][c] !== undefined) ? String(rows[r][c]) : '';
+  }
+
+  function setSelectedValue(v) {
+    const r = selectedCell.r, c = selectedCell.c;
+    if (!rows[r]) rows[r] = [];
+    rows[r][c] = v;
+    notifyChange();
+    lastStartIdx = -1;
+    updateVirtualScroll(true);
+  }
+
+  function applyPasteText(text, r, c) {
+    const cells = text.replace(/\r\n/g, '\n').split('\n').map(line => line.split('\t'));
+    while (cells.length > 1 && cells[cells.length - 1].length === 1 && cells[cells.length - 1][0] === '') {
+      cells.pop();
+    }
+    for (let dy = 0; dy < cells.length; dy++) {
+      const rr = r + dy;
+      while (rows.length <= rr) {
+        rows.push(new Array(maxCols).fill(''));
+        rowOrigIdx.push(-1);
+      }
+      for (let dx = 0; dx < cells[dy].length; dx++) {
+        const cc = c + dx;
+        while (rows[rr].length <= cc) rows[rr].push('');
+        rows[rr][cc] = cells[dy][dx];
+        if (cc + 1 > maxCols) maxCols = cc + 1;
+      }
+    }
+    notifyChange();
+    poolColCount = -1;
+    lastStartIdx = -1;
+    renderHeader();
+    updateVirtualScroll(true);
+  }
+
+  async function clipboardWrite(text) {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+        return true;
+      }
+    } catch (_) { /* fallthrough */ }
+    // Fallback：临时 textarea + execCommand
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.left = '-9999px';
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      return ok;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  async function clipboardRead() {
+    try {
+      if (navigator.clipboard && navigator.clipboard.readText) {
+        return await navigator.clipboard.readText();
+      }
+    } catch (_) { /* fallthrough */ }
+    return null;
+  }
+
+  // 键盘 Ctrl+C/V/X 路径（焦点不在输入框时）
+  document.addEventListener('copy', (e) => {
+    const ae = document.activeElement;
+    if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) return;
+    if (!filteredIndices.length) return;
+    e.clipboardData.setData('text/plain', getSelectedValue());
+    e.preventDefault();
+  });
+
+  document.addEventListener('cut', (e) => {
+    const ae = document.activeElement;
+    if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) return;
+    if (!filteredIndices.length) return;
+    e.clipboardData.setData('text/plain', getSelectedValue());
+    e.preventDefault();
+    setSelectedValue('');
+  });
+
+  document.addEventListener('paste', (e) => {
+    const ae = document.activeElement;
+    if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) return;
+    if (!filteredIndices.length) return;
+    const text = e.clipboardData.getData('text/plain');
+    if (text === '') return;
+    e.preventDefault();
+    applyPasteText(text, selectedCell.r, selectedCell.c);
+  });
+
+  // ===== 右键菜单 =====
+  const contextMenu = document.createElement('div');
+  contextMenu.id = 'slk-context-menu';
+  contextMenu.style.cssText = [
+    'position: fixed',
+    'display: none',
+    'z-index: 99999',
+    'min-width: 140px',
+    'padding: 4px 0',
+    'background: var(--vscode-menu-background, #252526)',
+    'color: var(--vscode-menu-foreground, #cccccc)',
+    'border: 1px solid var(--vscode-menu-border, #454545)',
+    'box-shadow: 0 2px 8px rgba(0,0,0,0.35)',
+    'font-size: 13px',
+    'user-select: none',
+  ].join(';');
+  document.body.appendChild(contextMenu);
+
+  function hideContextMenu() {
+    contextMenu.style.display = 'none';
+    contextMenu.innerHTML = '';
+  }
+
+  function showContextMenu(x, y) {
+    contextMenu.innerHTML = '';
+
+    const items = [
+      { label: '复制', action: async () => { await clipboardWrite(getSelectedValue()); } },
+      { label: '剪切', action: async () => {
+          const v = getSelectedValue();
+          await clipboardWrite(v);
+          setSelectedValue('');
+        } },
+      { label: '粘贴', action: async () => {
+          const t = await clipboardRead();
+          if (t !== null && t !== '') {
+            applyPasteText(t, selectedCell.r, selectedCell.c);
+          }
+        } },
+      { label: '清空', action: () => { setSelectedValue(''); } },
+    ];
+
+    for (const it of items) {
+      const el = document.createElement('div');
+      el.textContent = it.label;
+      el.style.cssText = 'padding: 6px 20px; cursor: pointer; white-space: nowrap;';
+      el.addEventListener('mouseenter', () => {
+        el.style.background = 'var(--vscode-menu-selectionBackground, #094771)';
+        el.style.color = 'var(--vscode-menu-selectionForeground, #ffffff)';
+      });
+      el.addEventListener('mouseleave', () => {
+        el.style.background = '';
+        el.style.color = '';
+      });
+      el.addEventListener('mousedown', (e) => {
+        // 阻止 click-away 先关闭菜单
+        e.stopPropagation();
+      });
+      el.addEventListener('click', (e) => {
+        e.stopPropagation();
+        hideContextMenu();
+        it.action();
+      });
+      contextMenu.appendChild(el);
+    }
+
+    // 先显示，测量尺寸，再做边界修正
+    contextMenu.style.display = 'block';
+    const rect = contextMenu.getBoundingClientRect();
+    let nx = x, ny = y;
+    if (nx + rect.width > window.innerWidth) nx = window.innerWidth - rect.width - 4;
+    if (ny + rect.height > window.innerHeight) ny = window.innerHeight - rect.height - 4;
+    if (nx < 0) nx = 4;
+    if (ny < 0) ny = 4;
+    contextMenu.style.left = nx + 'px';
+    contextMenu.style.top = ny + 'px';
+  }
+
+  // 右键：选中格 + 弹菜单
+  if (rowsLayer) {
+    rowsLayer.addEventListener('contextmenu', (e) => {
+      const cell = e.target.closest('.cell');
+      if (!cell) return;
+      const r = parseInt(cell.dataset.r, 10);
+      const c = parseInt(cell.dataset.c, 10);
+      if (isNaN(r) || isNaN(c)) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+      commitEditing();
+      selectedCell = { r, c };
+      updateSelectedClass();
+      updateInfo();
+      showContextMenu(e.clientX, e.clientY);
+    });
+  }
+
+  // 点其他地方、滚动、resize 时隐藏菜单
+  document.addEventListener('click', (e) => {
+    if (!contextMenu.contains(e.target)) hideContextMenu();
+  });
+  document.addEventListener('contextmenu', (e) => {
+    if (!e.target.closest('.cell')) hideContextMenu();
+  });
+  if (bodyContainer) {
+    bodyContainer.addEventListener('scroll', hideContextMenu, { passive: true });
+  }
+  window.addEventListener('resize', hideContextMenu);
+  window.addEventListener('blur', hideContextMenu);
+
   function notifyChange() {
-    // vscode.postMessage({ type: 'saveData', rows });
     updateInfo();
+    if (changeTimer) clearTimeout(changeTimer);
+    changeTimer = setTimeout(() => {
+      changeTimer = null;
+      vscode.postMessage({ type: 'contentChanged', rows, rowOrigIdx });
+    }, 150);
   }
 
   function updateInfo() {
@@ -410,7 +617,6 @@ window.addEventListener('error', (err) => {
     infoSpan.textContent = `总行数: ${totalData} (过滤: ${filteredIndices.length}) | 列: ${maxCols} | 位置: 行 ${selectedCell.r}, 列 ${selectedCell.c + 1} (${fieldName})`;
   }
 
-  // ===== 行/列操作 =====
   function rebuildAndStay(targetRealRow) {
     commitEditing();
     updateFilter(false);
@@ -419,17 +625,19 @@ window.addEventListener('error', (err) => {
     lastStartIdx = -1;
     updateVirtualScroll(true);
     updateSelectedClass();
-    scrollToRowIndex(selectedCell.r);
+    ensureRowVisible(selectedCell.r);
   }
 
   getEl('add-row').onclick = () => {
     const pos = (selectedCell.r > 0 && selectedCell.r < rows.length) ? selectedCell.r + 1 : rows.length;
     rows.splice(pos, 0, new Array(maxCols).fill(''));
+    rowOrigIdx.splice(pos, 0, -1);
     rebuildAndStay(pos);
   };
 
   getEl('add-row-end').onclick = () => {
     rows.push(new Array(maxCols).fill(''));
+    rowOrigIdx.push(-1);
     rebuildAndStay(rows.length - 1);
     setTimeout(() => {
       if (bodyContainer) bodyContainer.scrollTop = bodyContainer.scrollHeight;
@@ -441,6 +649,7 @@ window.addEventListener('error', (err) => {
     const copy = [...rows[selectedCell.r]];
     const pos = selectedCell.r + 1;
     rows.splice(pos, 0, copy);
+    rowOrigIdx.splice(pos, 0, -1);
     rebuildAndStay(pos);
   };
 
@@ -450,6 +659,7 @@ window.addEventListener('error', (err) => {
     const pos = selectedCell.r;
     if (pos <= 0 || pos >= rows.length) return;
     rows.splice(pos, 1);
+    rowOrigIdx.splice(pos, 1);
     rebuildAndStay(Math.min(pos, rows.length - 1));
   };
 
@@ -509,10 +719,11 @@ window.addEventListener('error', (err) => {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
       e.preventDefault();
       e.stopPropagation();
-      commitEditing();   // 先提交正在编辑的格子
-      vscode.postMessage({ type: 'saveData', rows });
+      commitEditing();
+      if (changeTimer) { clearTimeout(changeTimer); changeTimer = null; }
+      vscode.postMessage({ type: 'save', rows, rowOrigIdx });
     }
-  }, true);   // capture 阶段拦截，保证在 input 冒泡前生效
+  }, true);
 
   vscode.postMessage({ type: 'ready' });
 })();

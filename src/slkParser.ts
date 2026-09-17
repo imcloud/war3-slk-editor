@@ -3,9 +3,9 @@ export interface SlkCellMeta {
   fHasY: boolean;
   fHasX: boolean;
   fExtra: string;
-  fOrigY?: number;      // ★ 新增
-  fOrigX?: number;      // ★ 新增
-  rawF?: string;        // ★ 新增：原始 F 行文本
+  fOrigY?: number;
+  fOrigX?: number;
+  rawF?: string;
 
   hasC: boolean;
   cHasY: boolean;
@@ -24,10 +24,11 @@ export interface SlkData {
   headerLines?: string[];
   bRecord?: string;
   tailLines?: string[];
-  bodyExtraLines?: string[];   // 新增：body 阶段出现的 P/O 等非 F/C 记录
+  bodyExtraLines?: string[];
   eol?: '\r\n' | '\n';
   finalNewline?: boolean;
-  originalContent?: string;    // 新增：原始文本，用于零编辑快速返回
+  originalContent?: string;
+  rowIndexByFirstCol?: Map<string, number[]>;
 }
 
 function parseSlkLineFields(line: string): string[] {
@@ -65,6 +66,7 @@ export function parseSLK(content: string): SlkData {
   const eol: '\r\n' | '\n' = content.indexOf('\r\n') !== -1 ? '\r\n' : '\n';
   const finalNewline = content.endsWith('\n');
 
+  let pendingF: { rawF: string; yTag: boolean; xTag: boolean; extra: string } | null = null;
   let phase: 'header' | 'body' | 'tail' = 'header';
   const lines = content.split(/\r?\n/);
 
@@ -72,12 +74,10 @@ export function parseSLK(content: string): SlkData {
     const line = lines[i];
     const trimmed = line.trim();
 
-    // 头部区
     if (phase === 'header') {
       if (trimmed.startsWith('C;')) {
         phase = 'body';
       } else if (trimmed.startsWith('F;')) {
-        // 检查是否有 X 或 Y
         const tokens = parseSlkLineFields(trimmed);
         let hasCoord = false;
         for (let j = 1; j < tokens.length; j++) {
@@ -88,7 +88,7 @@ export function parseSLK(content: string): SlkData {
         if (hasCoord) {
           phase = 'body';
         } else {
-          headerLines.push(line);   // ★ 无 X/Y → 留 header
+          headerLines.push(line);
           continue;
         }
       } else if (trimmed === 'E' || trimmed.startsWith('E;')) {
@@ -101,14 +101,12 @@ export function parseSLK(content: string): SlkData {
       }
     }
 
-    // 尾部区
     if (phase === 'tail') {
       if (i === lines.length - 1 && line === '') continue;
       tailLines.push(line);
       continue;
     }
 
-    // 主体区
     if (phase === 'body') {
       if (trimmed === 'E' || trimmed.startsWith('E;')) {
         phase = 'tail';
@@ -179,17 +177,18 @@ export function parseSLK(content: string): SlkData {
         const extraStr = extraFields.length > 0 ? ';' + extraFields.join(';') : '';
 
         if (recType === 'F') {
-          if (!meta.hasF) {                    // ★ 只保留第一条 F
-            meta.rawF = trimmed;
-            meta.fOrigY = recordY ?? undefined;
-            meta.fOrigX = recordX ?? undefined;
-          }
-          meta.hasF = true;
-          meta.fHasY = yTag;
-          meta.fHasX = xTag;
-          meta.fExtra = extraStr;
-          if (curX > maxCols) maxCols = curX;
+          pendingF = { rawF: trimmed, yTag, xTag, extra: extraStr };
         } else if (recType === 'C') {
+          if (pendingF) {
+            meta.hasF = true;
+            meta.fHasY = pendingF.yTag;
+            meta.fHasX = pendingF.xTag;
+            meta.fExtra = pendingF.extra;
+            meta.rawF = pendingF.rawF;
+            meta.fOrigY = curY;
+            meta.fOrigX = curX;
+            pendingF = null;
+          }
           meta.hasC = true;
           meta.cHasY = yTag;
           meta.cHasX = xTag;
@@ -211,7 +210,6 @@ export function parseSLK(content: string): SlkData {
 
         cellMap.set(cellKey, meta);
       } else {
-        // ★ 修复：body 阶段的非 F/C/E 行（P、O、空行、注释等）保留
         bodyExtraLines.push(line);
       }
     }
@@ -220,6 +218,13 @@ export function parseSLK(content: string): SlkData {
   for (let r = 0; r < grid.length; r++) {
     if (!grid[r]) grid[r] = [];
     while (grid[r].length < maxCols) grid[r].push('');
+  }
+
+  const rowIndexByFirstCol = new Map<string, number[]>();
+  for (let y = 0; y < grid.length; y++) {
+    const key = String(grid[y]?.[0] ?? '');
+    if (!rowIndexByFirstCol.has(key)) rowIndexByFirstCol.set(key, []);
+    rowIndexByFirstCol.get(key)!.push(y);
   }
 
   return {
@@ -234,12 +239,10 @@ export function parseSLK(content: string): SlkData {
     eol,
     finalNewline,
     originalContent: content,
+    rowIndexByFirstCol,
   };
 }
 
-/**
- * 判断当前 rows 与原始解析结果是否语义一致（无编辑）
- */
 function isUnchanged(rows: string[][], meta: SlkData): boolean {
   const orig = meta.rows;
   if (rows.length !== orig.length) return false;
@@ -256,8 +259,29 @@ function isUnchanged(rows: string[][], meta: SlkData): boolean {
   return true;
 }
 
-export function stringifySLK(rows: string[][], meta?: SlkData): string {
-  // ★ 零编辑快速路径：字节级原样返回
+function findOrigYByFirstCol(
+  meta: SlkData | undefined,
+  firstColValue: string,
+  hintY: number
+): number {
+  if (!meta?.rowIndexByFirstCol) return -1;
+  const list = meta.rowIndexByFirstCol.get(firstColValue);
+  if (!list || list.length === 0) return -1;
+  if (list.length === 1) return list[0];
+  let best = list[0];
+  let bestDist = Math.abs(list[0] - hintY);
+  for (let i = 1; i < list.length; i++) {
+    const d = Math.abs(list[i] - hintY);
+    if (d < bestDist) { best = list[i]; bestDist = d; }
+  }
+  return best;
+}
+
+export function stringifySLK(
+  rows: string[][],
+  meta?: SlkData,
+  rowOrigIdx?: number[]
+): string {
   if (meta?.originalContent !== undefined && isUnchanged(rows, meta)) {
     return meta.originalContent;
   }
@@ -273,7 +297,6 @@ export function stringifySLK(rows: string[][], meta?: SlkData): string {
   const origMaxCols = meta?.maxCols ?? maxCols;
   const structureChanged = (maxRows !== origMaxRows) || (maxCols !== origMaxCols);
 
-  // 1. 头部
   if (meta?.headerLines) {
     for (const h of meta.headerLines) {
       const ht = h.trimStart();
@@ -292,7 +315,6 @@ export function stringifySLK(rows: string[][], meta?: SlkData): string {
     lines.push('ID;PWXL;N;E');
   }
 
-  // 2. B 记录
   if (meta?.bRecord) {
     let newB = meta.bRecord;
     if (/Y\d+/.test(newB)) newB = newB.replace(/Y\d+/, `Y${maxRows}`);
@@ -302,12 +324,10 @@ export function stringifySLK(rows: string[][], meta?: SlkData): string {
     lines.push(newB);
   }
 
-  // ★ 3. body 阶段的 P/O 记录（保留，放在数据之前）
   if (meta?.bodyExtraLines && meta.bodyExtraLines.length > 0) {
     lines.push(...meta.bodyExtraLines);
   }
 
-  // 4. 数据体
   let currentY = 1;
   let currentX = 1;
 
@@ -315,10 +335,26 @@ export function stringifySLK(rows: string[][], meta?: SlkData): string {
     const row = rows[y];
     if (!row) continue;
 
+    const firstColVal = String(row[0] ?? '');
+
+    // ★ 主方案：rowOrigIdx；兜底：第一列值查表
+    let origY: number;
+    const hinted = rowOrigIdx ? rowOrigIdx[y] : undefined;
+    if (hinted !== undefined && hinted >= 0) {
+      origY = hinted;
+    } else {
+      // 新行（-1）或 rowOrigIdx 缺失 → 尝试值查表
+      // 这样"复制行但没改 id"也能继承源行的 F，
+      // 而"原地改了 id"由 rowOrigIdx 保证保留 F（走上面那条分支）
+      origY = findOrigYByFirstCol(meta, firstColVal, y);
+    }
+
     for (let x = 0; x < maxCols; x++) {
       const val = row[x];
       const isEmpty = (val === undefined || val === null || val === '');
-      const cellMeta = meta?.cellMap?.get(`${y}_${x}`);
+      const cellMeta = origY >= 0
+        ? meta?.cellMap?.get(`${origY}_${x}`)
+        : undefined;
 
       if (isEmpty && !cellMeta) continue;
       if (isEmpty && cellMeta && !cellMeta.hasF) continue;
@@ -391,7 +427,6 @@ export function stringifySLK(rows: string[][], meta?: SlkData): string {
     }
   }
 
-  // 5. 尾部
   if (meta?.tailLines && meta.tailLines.length > 0) {
     lines.push(...meta.tailLines);
   } else {
