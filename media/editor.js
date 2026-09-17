@@ -291,6 +291,10 @@ window.addEventListener('error', (err) => {
       const rowData = rows[r];
       const isSelRow = selR === r;
 
+      const hasSelNum = row.cellNum.classList.contains('row-selected');
+      if (isSelRow && !hasSelNum) row.cellNum.classList.add('row-selected');
+      else if (!isSelRow && hasSelNum) row.cellNum.classList.remove('row-selected');
+
       for (let c = 0; c < maxCols; c++) {
         const cell = row.cells[c];
         const val = rowData[c] !== undefined ? rowData[c] : '';
@@ -315,6 +319,11 @@ window.addEventListener('error', (err) => {
     for (const row of rowPool) {
       if (row.currentR === null) continue;
       const isSelRow = row.currentR === selectedCell.r;
+
+      const hasSelNum = row.cellNum.classList.contains('row-selected');
+      if (isSelRow && !hasSelNum) row.cellNum.classList.add('row-selected');
+      else if (!isSelRow && hasSelNum) row.cellNum.classList.remove('row-selected');
+
       for (let c = 0; c < row.cells.length; c++) {
         const cell = row.cells[c];
         const sel = isSelRow && selectedCell.c === c;
