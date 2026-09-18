@@ -356,6 +356,9 @@ window.addEventListener('error', (err) => {
   // ===== 单击选中 / 双击编辑 =====
   if (rowsLayer) {
     rowsLayer.addEventListener('click', (e) => {
+      if (e.target.classList && e.target.classList.contains('cell-editor')) {
+        return;
+      }
       const cell = e.target.closest('.cell');
       if (!cell) return;
       const r = parseInt(cell.dataset.r, 10);

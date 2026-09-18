@@ -3,7 +3,7 @@
   "publisher": "imcloud",
   "displayName": "Warcraft III SLK Editor",
   "description": "Visual spreadsheet editor for Warcraft III map .slk files",
-  "version": "1.1.5",
+  "version": "1.1.6",
   "license": "MIT",
   "icon": "icon.png",
   "repository": {

@@ -66,7 +66,7 @@ export function parseSLK(content: string): SlkData {
   const eol: '\r\n' | '\n' = content.indexOf('\r\n') !== -1 ? '\r\n' : '\n';
   const finalNewline = content.endsWith('\n');
 
-  let pendingF: { rawF: string; yTag: boolean; xTag: boolean; extra: string } | null = null;
+  // ★ pendingF 已删除
   let phase: 'header' | 'body' | 'tail' = 'header';
   const lines = content.split(/\r?\n/);
 
@@ -177,18 +177,15 @@ export function parseSLK(content: string): SlkData {
         const extraStr = extraFields.length > 0 ? ';' + extraFields.join(';') : '';
 
         if (recType === 'F') {
-          pendingF = { rawF: trimmed, yTag, xTag, extra: extraStr };
+          // ★ F 独立存储到它自己的 cellKey（不再附属到下一个 C）
+          meta.hasF = true;
+          meta.fHasY = yTag;
+          meta.fHasX = xTag;
+          meta.fExtra = extraStr;
+          meta.rawF = trimmed;
+          meta.fOrigY = curY;
+          meta.fOrigX = curX;
         } else if (recType === 'C') {
-          if (pendingF) {
-            meta.hasF = true;
-            meta.fHasY = pendingF.yTag;
-            meta.fHasX = pendingF.xTag;
-            meta.fExtra = pendingF.extra;
-            meta.rawF = pendingF.rawF;
-            meta.fOrigY = curY;
-            meta.fOrigX = curX;
-            pendingF = null;
-          }
           meta.hasC = true;
           meta.cHasY = yTag;
           meta.cHasX = xTag;
@@ -337,15 +334,11 @@ export function stringifySLK(
 
     const firstColVal = String(row[0] ?? '');
 
-    // ★ 主方案：rowOrigIdx；兜底：第一列值查表
     let origY: number;
     const hinted = rowOrigIdx ? rowOrigIdx[y] : undefined;
     if (hinted !== undefined && hinted >= 0) {
       origY = hinted;
     } else {
-      // 新行（-1）或 rowOrigIdx 缺失 → 尝试值查表
-      // 这样"复制行但没改 id"也能继承源行的 F，
-      // 而"原地改了 id"由 rowOrigIdx 保证保留 F（走上面那条分支）
       origY = findOrigYByFirstCol(meta, firstColVal, y);
     }
 
@@ -363,9 +356,9 @@ export function stringifySLK(
       const tgtX = x + 1;
 
       if (cellMeta?.hasF) {
+        // ★ 放宽：只要 rawF 存在且位置一致就复用（不再要求 fHasY && fHasX）
         const canReuseF =
           cellMeta.rawF !== undefined &&
-          cellMeta.fHasY && cellMeta.fHasX &&
           cellMeta.fOrigY === tgtY &&
           cellMeta.fOrigX === tgtX;
 
