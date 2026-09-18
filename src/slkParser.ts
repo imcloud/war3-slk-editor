@@ -29,6 +29,11 @@ export interface SlkData {
   finalNewline?: boolean;
   originalContent?: string;
   rowIndexByFirstCol?: Map<string, number[]>;
+
+  /** 原文件是否以 UTF-8 BOM 开头 */
+  hasBOM?: boolean;
+  /** P 段中定义的样式总数（P 记录条数），用于校验 F;SMxxx / F;SDMxxx 引用 */
+  styleCount?: number;
 }
 
 function parseSlkLineFields(line: string): string[] {
@@ -52,6 +57,9 @@ function parseSlkLineFields(line: string): string[] {
 }
 
 export function parseSLK(content: string): SlkData {
+  const hasBOM = content.length > 0 && content.charCodeAt(0) === 0xFEFF;
+  if (hasBOM) content = content.substring(1);
+
   const grid: string[][] = [];
   const cellMap = new Map<string, SlkCellMeta>();
   const headerLines: string[] = [];
@@ -224,6 +232,12 @@ export function parseSLK(content: string): SlkData {
     rowIndexByFirstCol.get(key)!.push(y);
   }
 
+  // === 新增：统计 P 段样式总数 ===
+  let styleCount = 0;
+  for (const h of headerLines) {
+    if (h.startsWith('P;')) styleCount++;
+  }
+
   return {
     rows: grid,
     maxCols: maxCols || 1,
@@ -235,8 +249,11 @@ export function parseSLK(content: string): SlkData {
     bodyExtraLines,
     eol,
     finalNewline,
-    originalContent: content,
+    originalContent: hasBOM ? '\uFEFF' + content : content,
     rowIndexByFirstCol,
+    // === 新增 ===
+    hasBOM,
+    styleCount,
   };
 }
 
@@ -279,6 +296,7 @@ export function stringifySLK(
   meta?: SlkData,
   rowOrigIdx?: number[]
 ): string {
+  // 未修改：原样返回（包含 BOM）
   if (meta?.originalContent !== undefined && isUnchanged(rows, meta)) {
     return meta.originalContent;
   }
@@ -294,6 +312,19 @@ export function stringifySLK(
   const origMaxCols = meta?.maxCols ?? maxCols;
   const structureChanged = (maxRows !== origMaxRows) || (maxCols !== origMaxCols);
 
+  // === 新增：样式引用校验器 ===
+  // 若 F 记录里的 SM/SDM 数字超过 P 段实际定义数，则视为无效引用，
+  // 直接丢弃整条 F 记录，避免 Excel 因悬空引用而报"文件损坏"。
+  const styleCount = meta?.styleCount ?? 0;
+  const isValidFRecord = (rec: string): boolean => {
+    if (styleCount <= 0) return true; // 无法判断，保守放行
+    const m = /(?:^|;)S(?:DM)?(\d+)(?:;|$)/.exec(rec);
+    if (!m) return true;              // 无样式引用，直接放行
+    const idx = parseInt(m[1], 10);
+    return idx >= 0 && idx < styleCount;
+  };
+
+  // === header（P 段 + F;P0 + B; 记录） ===
   if (meta?.headerLines) {
     for (const h of meta.headerLines) {
       const ht = h.trimStart();
@@ -303,6 +334,9 @@ export function stringifySLK(
         else newB += `;Y${maxRows}`;
         if (/X\d+/.test(newB)) newB = newB.replace(/X\d+/, `X${maxCols}`);
         else newB += `;X${maxCols}`;
+        newB = newB.replace(/\bD(\d+) (\d+) (\d+) (\d+)\b/, (_, a, b, _c, _d) =>
+          `D${a} ${b} ${maxRows - 1} ${maxCols - 1}`
+        );
         lines.push(newB);
       } else {
         lines.push(h);
@@ -318,6 +352,9 @@ export function stringifySLK(
     else newB += `;Y${maxRows}`;
     if (/X\d+/.test(newB)) newB = newB.replace(/X\d+/, `X${maxCols}`);
     else newB += `;X${maxCols}`;
+    newB = newB.replace(/\bD(\d+) (\d+) (\d+) (\d+)\b/, (_, a, b, _c, _d) =>
+      `D${a} ${b} ${maxRows - 1} ${maxCols - 1}`
+    );
     lines.push(newB);
   }
 
@@ -327,6 +364,22 @@ export function stringifySLK(
 
   let currentY = 1;
   let currentX = 1;
+
+  const fallbackOrigY: number[] = new Array(maxRows).fill(-1);
+  {
+    let last = -1;
+    for (let y = 0; y < maxRows; y++) {
+      const oy = rowOrigIdx ? rowOrigIdx[y] : y;
+      if (oy >= 0) last = oy;
+      fallbackOrigY[y] = last;
+    }
+    let next = -1;
+    for (let y = maxRows - 1; y >= 0; y--) {
+      const oy = rowOrigIdx ? rowOrigIdx[y] : y;
+      if (oy >= 0) next = oy;
+      if (fallbackOrigY[y] < 0) fallbackOrigY[y] = next;
+    }
+  }
 
   for (let y = 0; y < maxRows; y++) {
     const row = rows[y];
@@ -345,9 +398,31 @@ export function stringifySLK(
     for (let x = 0; x < maxCols; x++) {
       const val = row[x];
       const isEmpty = (val === undefined || val === null || val === '');
-      const cellMeta = origY >= 0
+      let cellMeta = origY >= 0
         ? meta?.cellMap?.get(`${origY}_${x}`)
         : undefined;
+
+      if (!cellMeta && origY < 0 && x === 0) {
+        const tplY = fallbackOrigY[y];
+        if (tplY >= 0) {
+          const tpl = meta?.cellMap?.get(`${tplY}_0`);
+          if (tpl?.hasF) {
+            cellMeta = {
+              hasF: true,
+              fHasY: tpl.fHasY,
+              fHasX: tpl.fHasX,
+              fExtra: tpl.fExtra,
+              fOrigY: tpl.fOrigY,
+              fOrigX: tpl.fOrigX,
+              rawF: tpl.rawF,
+              hasC: false,
+              cHasY: false,
+              cHasX: false,
+              cExtra: '',
+            };
+          }
+        }
+      }
 
       if (isEmpty && !cellMeta) continue;
       if (isEmpty && cellMeta && !cellMeta.hasF) continue;
@@ -355,17 +430,17 @@ export function stringifySLK(
       const tgtY = y + 1;
       const tgtX = x + 1;
 
+      // === F 记录输出（带样式引用校验） ===
       if (cellMeta?.hasF) {
-        // ★ 放宽：只要 rawF 存在且位置一致就复用（不再要求 fHasY && fHasX）
+        let fOut: string | null = null;
+
         const canReuseF =
           cellMeta.rawF !== undefined &&
           cellMeta.fOrigY === tgtY &&
           cellMeta.fOrigX === tgtX;
 
         if (canReuseF) {
-          lines.push(cellMeta.rawF!);
-          currentY = tgtY;
-          currentX = tgtX;
+          fOut = cellMeta.rawF!;
         } else {
           let out = 'F';
           if (cellMeta.fExtra) out += cellMeta.fExtra;
@@ -380,10 +455,19 @@ export function stringifySLK(
             out += `;X${tgtX}`;
             currentX = tgtX;
           }
-          lines.push(out);
+          fOut = out;
         }
+
+        if (fOut && isValidFRecord(fOut)) {
+          lines.push(fOut);
+          currentY = tgtY;
+          currentX = tgtX;
+        }
+        // else: 引用越界，直接丢弃该 F 记录，保留单元格数据，
+        //       避免 Excel 因悬空样式引用而拒绝打开文件。
       }
 
+      // === C 记录输出（保持不变，但补上强制 X 修复） ===
       if (!isEmpty) {
         let out = 'C';
         const isNewCell = !cellMeta || (!cellMeta.hasF && !cellMeta.hasC);
@@ -397,11 +481,15 @@ export function stringifySLK(
           out += `;Y${tgtY}`;
           currentY = tgtY;
           currentX = 1;
-        }
-        const needX = cHasX || (allowStateMachine && currentX !== tgtX);
-        if (needX) {
+          // === 关键修复：Y 之后强制补 X，防止解析器不重置 X ===
           out += `;X${tgtX}`;
           currentX = tgtX;
+        } else {
+          const needX = cHasX || (allowStateMachine && currentX !== tgtX);
+          if (needX) {
+            out += `;X${tgtX}`;
+            currentX = tgtX;
+          }
         }
 
         let formattedVal: string;
@@ -420,14 +508,22 @@ export function stringifySLK(
     }
   }
 
+  // === tail ===
   if (meta?.tailLines && meta.tailLines.length > 0) {
     lines.push(...meta.tailLines);
   } else {
     lines.push('E');
   }
 
+  // === 结尾拼装（含 BOM + EOL + finalNewline 强制） ===
+  // 强制使用 CRLF（Excel 对 SLK 的默认期望），并确保文件末尾一定有换行。
   const eol = meta?.eol ?? '\r\n';
-  const finalNewline = meta?.finalNewline ?? true;
-  const text = lines.join(eol);
-  return finalNewline ? text + eol : text;
+  let text = lines.join(eol);
+  // 无论 meta.finalNewline 为何，SLK 文件末尾必须有换行符，否则 Excel 可能报损坏
+  text += eol;
+
+  if (meta?.hasBOM) {
+    text = '\uFEFF' + text;
+  }
+  return text;
 }
