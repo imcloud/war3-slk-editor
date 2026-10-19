@@ -118,4 +118,21 @@ test('format 插值缺失参数时保留占位符', () => {
   assert.strictEqual(i18n.format('行 {r} 列 {c}', { r: 3 }), '行 3 列 {c}');
 });
 
+test('package.json 配置项与 nls 文案一一对应', () => {
+  const pkg = require('../package.json');
+  const props = pkg.contributes.configuration.properties;
+  assert.ok(props['war3Slk.focusOnOpen'], 'focusOnOpen not contributed');
+  assert.strictEqual(props['war3Slk.focusOnOpen'].default, true);
+
+  const en = require('../package.nls.json');
+  const zh = require('../package.nls.zh-cn.json');
+  for (const name of ['war3Slk.language', 'war3Slk.focusOnOpen']) {
+    const desc = props[name].description;
+    const key = desc.replace(/^%|%$/g, '');
+    assert.ok(desc.startsWith('%') && desc.endsWith('%'), name + ' should use nls placeholder');
+    assert.ok(en[key], 'missing en nls key: ' + key);
+    assert.ok(zh[key], 'missing zh nls key: ' + key);
+  }
+});
+
 console.log('\n' + passed + ' passed');

@@ -33,6 +33,20 @@ export class SlkEditorProvider implements vscode.CustomTextEditorProvider {
 
     webviewPanel.webview.html = this.getHtmlForWebview(webviewPanel.webview, s, locale);
 
+    // 从资源管理器单击打开时（预览标签，标题斜体）焦点仍留在 Explorer，
+    // Ctrl+C/Ctrl+V 会被当成"复制/粘贴文件"，导致多出一个 .slk 副本。
+    // 打开后把键盘焦点交给 webview，快捷键才会落到表格上。
+    const focusWebview = () => {
+      const enabled = vscode.workspace
+        .getConfiguration('war3Slk')
+        .get<boolean>('focusOnOpen', true);
+      if (!enabled || !webviewPanel.active) return;
+      void vscode.commands.executeCommand('workbench.action.focusActiveEditorGroup');
+    };
+    setTimeout(focusWebview, 0);
+    // 面板激活时机在不同 VS Code 版本里略有差异，再补一次
+    setTimeout(focusWebview, 150);
+
     let suppressDocChangeUntil = 0;
 
     const encItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
@@ -68,6 +82,7 @@ export class SlkEditorProvider implements vscode.CustomTextEditorProvider {
       switch (e.type) {
         case 'ready':
           updateWebview();
+          focusWebview();
           return;
 
         case 'contentChanged':
@@ -105,8 +120,12 @@ export class SlkEditorProvider implements vscode.CustomTextEditorProvider {
     });
 
     webviewPanel.onDidChangeViewState(e => {
-      if (e.webviewPanel.active) encItem.show();
-      else encItem.hide();
+      if (e.webviewPanel.active) {
+        encItem.show();
+        focusWebview();
+      } else {
+        encItem.hide();
+      }
     });
 
     webviewPanel.onDidDispose(() => {

@@ -2,5 +2,6 @@
   "displayName": "Warcraft III SLK Editor",
   "description": "Visual spreadsheet editor for Warcraft III map .slk files, with multilingual UI and multi-row/column selection.",
   "editor.displayName": "WAR3 SLK Editor",
-  "config.language.description": "UI language. \"auto\" follows VS Code's display language; \"zh\" forces the Chinese UI, \"en\" forces English."
+  "config.language.description": "UI language. \"auto\" follows VS Code's display language; \"zh\" forces the Chinese UI, \"en\" forces English.",
+  "config.focusOnOpen.description": "Move keyboard focus into the spreadsheet when an SLK editor is opened. This prevents Ctrl+C / Ctrl+V from being handled by the Explorer (which would copy the .slk file itself). Disable it if you prefer to keep browsing files with the keyboard after opening one."
 }

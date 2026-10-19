@@ -2,5 +2,6 @@
   "displayName": "WAR3 SLK 编辑器",
   "description": "在 VS Code 中以表格方式查看和编辑 Warcraft III 的 .slk 文件，支持多行多列选择与中英文界面。",
   "editor.displayName": "WAR3 SLK 编辑器",
-  "config.language.description": "界面语言。auto 跟随 VS Code 显示语言；zh 强制中文，en 强制英文。"
+  "config.language.description": "界面语言。auto 跟随 VS Code 显示语言；zh 强制中文，en 强制英文。",
+  "config.focusOnOpen.description": "打开 SLK 编辑器时把键盘焦点移入表格。开启后 Ctrl+C / Ctrl+V 会作用于单元格，而不是被资源管理器当成复制/粘贴整个 .slk 文件。如果你习惯打开文件后继续用方向键浏览资源管理器，可以关掉它。"
 }
