@@ -1347,7 +1347,8 @@ window.addEventListener('error', function (ev) {
       var c = parseInt(cell.dataset.c, 10);
       if (isNaN(c)) return;
       pendingDrag = { kind: 'col', c: c, x: e.clientX, y: e.clientY, ctrl: e.ctrlKey || e.metaKey };
-      e.preventDefault();
+      // 注意：这里绝不能 preventDefault()。阻止 mousedown 默认行为会连带阻止
+      // 浏览器把焦点交给 webview，导致 Ctrl+C/V 落到资源管理器上复制整个文件。
     });
   }
 
@@ -1362,7 +1363,6 @@ window.addEventListener('error', function (ev) {
         var rowIdx = parseInt(numCell.dataset.r, 10);
         if (!isNaN(rowIdx)) {
           pendingDrag = { kind: 'row', r: rowIdx, x: e.clientX, y: e.clientY, ctrl: e.ctrlKey || e.metaKey };
-          e.preventDefault();
         }
         return;
       }
@@ -1373,7 +1373,6 @@ window.addEventListener('error', function (ev) {
       var c = parseInt(cell.dataset.c, 10);
       if (isNaN(r) || isNaN(c)) return;
       pendingDrag = { kind: 'cell', r: r, c: c, x: e.clientX, y: e.clientY, ctrl: e.ctrlKey || e.metaKey };
-      e.preventDefault();
     });
   }
 

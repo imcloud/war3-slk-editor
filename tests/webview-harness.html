@@ -127,6 +127,25 @@
       check('数据行渲染 3 行', visibleRows().length === 3, 'rendered=' + visibleRows().length);
       check('首行首格内容正确', cellEl(1, 0) && cellEl(1, 0).textContent === 'hfoo');
 
+      // ---- mousedown 不能 preventDefault，否则 webview 永远拿不到键盘焦点 ----
+      var probeRect = cellEl(1, 0).getBoundingClientRect();
+      var mdCell = new MouseEvent('mousedown', {
+        bubbles: true, cancelable: true, button: 0, buttons: 1,
+        clientX: probeRect.left + 8, clientY: probeRect.top + 8,
+      });
+      cellEl(1, 0).dispatchEvent(mdCell);
+      document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, buttons: 0 }));
+      check('点击单元格不阻止默认焦点行为', mdCell.defaultPrevented === false);
+
+      var probeHeader = document.querySelectorAll('#header-row .cell')[0].getBoundingClientRect();
+      var mdHeader = new MouseEvent('mousedown', {
+        bubbles: true, cancelable: true, button: 0, buttons: 1,
+        clientX: probeHeader.left + 8, clientY: probeHeader.top + 8,
+      });
+      document.querySelectorAll('#header-row .cell')[0].dispatchEvent(mdHeader);
+      document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, buttons: 0 }));
+      check('点击列头不阻止默认焦点行为', mdHeader.defaultPrevented === false);
+
       // ---- 鼠标拖动框选 ----
       await dragBetween(cellEl(1, 0), cellEl(3, 1));
       check('拖动框选 3x2', document.querySelectorAll('#rows-layer .cell.cell-range').length === 6,
