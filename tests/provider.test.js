@@ -135,4 +135,29 @@ test('package.json 配置项与 nls 文案一一对应', () => {
   }
 });
 
+test('中英文案表键集合完全一致', () => {
+  const zh = i18n.getStrings('zh');
+  const en = i18n.getStrings('en');
+  assert.deepStrictEqual(Object.keys(zh).sort(), Object.keys(en).sort());
+});
+
+test('editor.js 里用到的 t() 键在中英文案中都存在', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const source = fs.readFileSync(path.join(__dirname, '..', 'media', 'editor.js'), 'utf8');
+  const zh = i18n.getStrings('zh');
+  const en = i18n.getStrings('en');
+
+  const used = new Set();
+  const re = /\bt\('([^']+)'/g;
+  let m;
+  while ((m = re.exec(source))) used.add(m[1]);
+
+  assert.ok(used.size > 10, 'expected to find i18n keys in editor.js, got ' + used.size);
+  for (const key of used) {
+    assert.ok(key in zh, 'missing zh string: ' + key);
+    assert.ok(key in en, 'missing en string: ' + key);
+  }
+});
+
 console.log('\n' + passed + ' passed');

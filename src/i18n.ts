@@ -90,7 +90,7 @@ const en: StringTable = {
   'menu.paste': 'Paste',
   'menu.clear': 'Clear Contents',
   'menu.insertRow': 'Insert Row Below',
-  'menu.insertCol': 'Insert Column Right',
+  'menu.insertCol': 'Insert Column to the Right',
   'menu.duplicateRow': 'Duplicate Row',
   'menu.deleteRows': 'Delete Selected Rows',
   'menu.deleteCols': 'Delete Selected Columns',
