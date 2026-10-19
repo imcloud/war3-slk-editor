@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="../media/editor.css">
+  <style>
+    html, body { width: 1200px; height: 800px; }
+    #harness-result {
+      position: fixed; right: 0; bottom: 0; z-index: 100000;
+      max-width: 900px; max-height: 300px; overflow: auto;
+      background: #000; color: #0f0; font: 12px monospace; margin: 0; padding: 8px;
+      white-space: pre-wrap;
+    }
+  </style>
+</head>
+<body>
+  <div id="toolbar">
+    <button id="undo"></button>
+    <button id="redo"></button>
+    <button id="add-row"></button>
+    <button id="add-row-end"></button>
+    <button id="dup-row"></button>
+    <button id="del-row"></button>
+    <button id="add-col"></button>
+    <button id="add-col-end"></button>
+    <button id="del-col"></button>
+    <input type="text" id="search-input">
+    <span id="info"></span>
+  </div>
+
+  <div id="grid-wrapper">
+    <div id="body-container">
+      <div class="header-sticky">
+        <div id="header-row" class="header-row"></div>
+      </div>
+      <div id="rows-area">
+        <div id="phantom"></div>
+        <div id="rows-layer"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="error-box"></div>
+  <pre id="harness-result">RUNNING</pre>
+
+  <script>
+    window.__messages = [];
+    window.acquireVsCodeApi = function () {
+      return {
+        postMessage: function (m) { window.__messages.push(m); },
+        getState: function () { return null; },
+        setState: function () {},
+      };
+    };
+    window.__SLK_I18N__ = {
+      'col.defaultName': 'Column {n}',
+      'info.position': 'row {r} col {c} ({field})',
+      'info.total': '{total} rows | {cols} cols',
+      'info.selRows': '{n} rows selected',
+      'info.selCols': '{n} cols selected',
+      'info.selCells': '{rows}x{cols} cells',
+      'menu.copy': 'Copy', 'menu.cut': 'Cut', 'menu.paste': 'Paste', 'menu.clear': 'Clear',
+      'menu.insertRow': 'Insert Row', 'menu.duplicateRow': 'Duplicate',
+      'menu.deleteRows': 'Delete Rows', 'menu.deleteCols': 'Delete Cols', 'menu.selectAll': 'Select All',
+      'error.script': '[JS error] {message}',
+    };
+  </script>
+  <script src="../media/gridOps.js"></script>
+  <script src="../media/editor.js"></script>
+  <script>
+    (async function () {
+      var out = [];
+      var failures = 0;
+
+      function check(name, cond, extra) {
+        out.push((cond ? 'ok   ' : 'FAIL ') + name + (extra ? ' :: ' + extra : ''));
+        if (!cond) failures++;
+      }
+      function wait(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+      function visibleRows() {
+        return Array.prototype.filter.call(
+          document.querySelectorAll('#rows-layer .data-row'),
+          function (r) { return r.style.display !== 'none'; }
+        );
+      }
+      function cellEl(r, c) {
+        return document.querySelector('#rows-layer .cell[data-r="' + r + '"][data-c="' + c + '"]');
+      }
+      function post(msg) { window.postMessage(msg, '*'); }
+      function lastContentChanged() {
+        for (var i = window.__messages.length - 1; i >= 0; i--) {
+          if (window.__messages[i].type === 'contentChanged') return window.__messages[i];
+        }
+        return null;
+      }
+
+      var grid = [
+        ['unitID', 'HP', 'Name'],
+        ['hfoo', '420', 'Footman'],
+        ['hpea', '220', 'Peasant'],
+        ['hrif', '350', 'Rifleman'],
+      ];
+
+      post({ type: 'load', data: { rows: grid, maxCols: 3 } });
+      await wait(80);
+
+      check('表头渲染 3 列', document.querySelectorAll('#header-row .cell').length === 3);
+      check('数据行渲染 3 行', visibleRows().length === 3, 'rendered=' + visibleRows().length);
+      check('首行首格内容正确', cellEl(1, 0) && cellEl(1, 0).textContent === 'hfoo');
+
+      // ---- 单元格 Shift 矩形选择 ----
+      cellEl(1, 0).dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await wait(10);
+      cellEl(2, 1).dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true }));
+      await wait(10);
+      check('Shift 矩形选择 2x2', document.querySelectorAll('#rows-layer .cell.cell-range').length === 4,
+        'count=' + document.querySelectorAll('#rows-layer .cell.cell-range').length);
+
+      // ---- Ctrl 多选行 ----
+      var nums = visibleRows().map(function (r) { return r.querySelector('.cell-num'); });
+      nums[0].dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await wait(10);
+      nums[1].dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true }));
+      await wait(10);
+      check('Ctrl 多选 2 行', document.querySelectorAll('#rows-layer .cell-num.row-selected').length === 2,
+        'count=' + document.querySelectorAll('#rows-layer .cell-num.row-selected').length);
+      check('行选中时输入栏显示行数', document.getElementById('info').textContent.indexOf('2 rows selected') !== -1,
+        document.getElementById('info').textContent);
+
+      // ---- Delete 删除选中行 ----
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true }));
+      await wait(300);
+      var msg = lastContentChanged();
+      check('Delete 删除 2 行并上抛 contentChanged', !!msg && msg.rows.length === 2,
+        msg ? 'rows=' + msg.rows.length : 'no message');
+      check('删除后剩余数据正确', !!msg && msg.rows[1][0] === 'hrif',
+        msg ? JSON.stringify(msg.rows) : '');
+
+      // ---- 撤销 ----
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true }));
+      await wait(300);
+      msg = lastContentChanged();
+      check('Ctrl+Z 撤销恢复 3 行', !!msg && msg.rows.length === 4,
+        msg ? 'rows=' + msg.rows.length : 'no message');
+
+      // ---- 列选择 + Delete 删列 ----
+      var headerCells = document.querySelectorAll('#header-row .cell');
+      headerCells[2].dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await wait(10);
+      check('点击列头选中列', document.querySelectorAll('#header-row .cell.col-selected').length === 1,
+        'count=' + document.querySelectorAll('#header-row .cell.col-selected').length);
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true }));
+      await wait(300);
+      msg = lastContentChanged();
+      check('Delete 删除 1 列', !!msg && msg.rows[0].length === 2,
+        msg ? 'cols=' + msg.rows[0].length : 'no message');
+
+      // ---- 撤销删列 ----
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true }));
+      await wait(300);
+      msg = lastContentChanged();
+      check('Ctrl+Z 恢复列', !!msg && msg.rows[0].length === 3,
+        msg ? 'cols=' + msg.rows[0].length : 'no message');
+
+      // ---- 粘贴 TSV ----
+      cellEl(1, 0).dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await wait(10);
+      var dt = new DataTransfer();
+      dt.setData('text/plain', 'X\tY\n1\t2');
+      document.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true }));
+      await wait(300);
+      msg = lastContentChanged();
+      check('粘贴 2x2 数据', !!msg && msg.rows[1][0] === 'X' && msg.rows[1][1] === 'Y' &&
+        msg.rows[2][0] === '1' && msg.rows[2][1] === '2',
+        msg ? JSON.stringify(msg.rows.slice(1, 3)) : 'no message');
+
+      // ---- 撤销粘贴 ----
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true }));
+      await wait(300);
+      msg = lastContentChanged();
+      check('Ctrl+Z 撤销粘贴', !!msg && msg.rows[1][0] === 'hfoo',
+        msg ? JSON.stringify(msg.rows[1]) : 'no message');
+
+      // ---- 重做粘贴 ----
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'y', ctrlKey: true, bubbles: true }));
+      await wait(300);
+      msg = lastContentChanged();
+      check('Ctrl+Y 重做粘贴', !!msg && msg.rows[1][0] === 'X',
+        msg ? JSON.stringify(msg.rows[1]) : 'no message');
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true }));
+      await wait(300);
+
+      // ---- 方向键 / Enter / 键入 ----
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+      await wait(20);
+      check('方向键下移活动单元格', document.getElementById('info').textContent.indexOf('row 2') !== -1,
+        document.getElementById('info').textContent);
+
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Q', bubbles: true }));
+      await wait(30);
+      var editorInput = document.querySelector('#rows-layer input.cell-editor');
+      check('键入直接进入编辑', !!editorInput && editorInput.value === 'Q',
+        editorInput ? editorInput.value : 'no input');
+      if (editorInput) {
+        editorInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      }
+      await wait(30);
+
+      // ---- 全选 + 复制（可选，headless 下剪贴板事件可能不可用） ----
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', ctrlKey: true, bubbles: true }));
+      await wait(20);
+      check('Ctrl+A 选区覆盖全表', document.querySelectorAll('#rows-layer .cell.cell-range').length >= 9,
+        'count=' + document.querySelectorAll('#rows-layer .cell.cell-range').length);
+
+      var copyDt = new DataTransfer();
+      document.dispatchEvent(new ClipboardEvent('copy', { clipboardData: copyDt, bubbles: true }));
+      await wait(20);
+      var copied = copyDt.getData('text/plain');
+      check('Ctrl+C 复制为 TSV（不含表头行）', copied.indexOf('hfoo\t420\tFootman') === 0,
+        JSON.stringify(copied.slice(0, 60)));
+
+      check('未触发 JS 错误遮罩', document.getElementById('error-box').style.display !== 'block',
+        document.getElementById('error-box').textContent);
+
+      var summary = failures === 0 ? 'ALL PASS (' + out.length + ')' : failures + ' FAILED';
+      document.getElementById('harness-result').textContent =
+        summary + '\n' + out.join('\n');
+      document.title = summary;
+    })().catch(function (e) {
+      document.getElementById('harness-result').textContent = 'HARNESS ERROR: ' + (e && e.stack ? e.stack : e);
+      document.title = 'HARNESS ERROR';
+    });
+  </script>
+</body>
+</html>

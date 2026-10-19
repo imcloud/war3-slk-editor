@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { parseSLK, stringifySLK, SlkData } from './slkParser';
+import { getStrings, resolveLocale, format, Locale, StringTable } from './i18n';
 
 export class SlkEditorProvider implements vscode.CustomTextEditorProvider {
   public static readonly viewType = 'war3.slkEditor';
@@ -22,13 +23,15 @@ export class SlkEditorProvider implements vscode.CustomTextEditorProvider {
     _token: vscode.CancellationToken
   ): Promise<void> {
     const docUriStr = document.uri.toString();
+    const locale = resolveLocale();
+    const s = getStrings(locale);
 
     webviewPanel.webview.options = {
       enableScripts: true,
       localResourceRoots: [vscode.Uri.joinPath(this.context.extensionUri, 'media')]
     };
 
-    webviewPanel.webview.html = this.getHtmlForWebview(webviewPanel.webview);
+    webviewPanel.webview.html = this.getHtmlForWebview(webviewPanel.webview, s, locale);
 
     let suppressDocChangeUntil = 0;
 
@@ -38,7 +41,7 @@ export class SlkEditorProvider implements vscode.CustomTextEditorProvider {
         .getConfiguration('files', document.uri)
         .get<string>('encoding') || 'utf8';
       encItem.text = `$(file-code) ${enc.toUpperCase()}`;
-      encItem.tooltip = `保存时使用编码：${enc}`;
+      encItem.tooltip = format(s['status.encodingTip'], { encoding: enc });
       encItem.show();
     };
     updateEncodingItem();
@@ -56,7 +59,7 @@ export class SlkEditorProvider implements vscode.CustomTextEditorProvider {
       } catch (err: any) {
         webviewPanel.webview.postMessage({
           type: 'error',
-          message: 'SLK 解析异常: ' + (err?.message || err)
+          message: format(s['error.parse'], { message: err?.message || err })
         });
       }
     };
@@ -76,7 +79,7 @@ export class SlkEditorProvider implements vscode.CustomTextEditorProvider {
           } catch (err: any) {
             webviewPanel.webview.postMessage({
               type: 'error',
-              message: '应用修改失败: ' + (err?.message || err)
+              message: format(s['error.apply'], { message: err?.message || err })
             });
           }
           return;
@@ -90,7 +93,7 @@ export class SlkEditorProvider implements vscode.CustomTextEditorProvider {
           } catch (err: any) {
             webviewPanel.webview.postMessage({
               type: 'error',
-              message: '保存失败: ' + (err?.message || err)
+              message: format(s['error.save'], { message: err?.message || err })
             });
           }
           return;
@@ -130,14 +133,27 @@ export class SlkEditorProvider implements vscode.CustomTextEditorProvider {
     await vscode.workspace.applyEdit(edit);
   }
 
-  private getHtmlForWebview(webview: vscode.Webview): string {
-    const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'editor.js'));
-    const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'editor.css'));
+  private getHtmlForWebview(webview: vscode.Webview, s: StringTable, locale: Locale): string {
+    const scriptUri = webview.asWebviewUri(
+      vscode.Uri.joinPath(this.context.extensionUri, 'media', 'editor.js')
+    );
+    const opsUri = webview.asWebviewUri(
+      vscode.Uri.joinPath(this.context.extensionUri, 'media', 'gridOps.js')
+    );
+    const styleUri = webview.asWebviewUri(
+      vscode.Uri.joinPath(this.context.extensionUri, 'media', 'editor.css')
+    );
     const nonce = getNonce();
+    const esc = escapeHtml;
+    // 序列化给 webview 的文案表；转义 < 避免提前闭合 script 标签
+    const i18nJson = JSON.stringify(s).replace(/</g, '\\u003c');
+
+    const btn = (id: string, labelKey: string, titleKey: string) =>
+      `<button id="${id}" title="${esc(s[titleKey])}">${esc(s[labelKey])}</button>`;
 
     return /* html */`
       <!DOCTYPE html>
-      <html lang="zh-CN">
+      <html lang="${locale === 'zh' ? 'zh-CN' : 'en'}">
       <head>
         <meta charset="UTF-8">
         <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
@@ -146,16 +162,18 @@ export class SlkEditorProvider implements vscode.CustomTextEditorProvider {
       </head>
       <body>
         <div id="toolbar">
-          <button id="add-row"      title="在当前行下方插入空白行">插入行</button>
-          <button id="add-row-end"  title="追加空白行到最后">追加行</button>
-          <button id="dup-row"      title="复制当前行向下插入">复制行</button>
-          <button id="del-row"      title="删除当前行">删除行</button>
-          <button id="add-col"      title="在当前列右侧插入空白列">插入列</button>
-          <button id="add-col-end"  title="追加空白列到最后">追加列</button>
-          <button id="del-col"      title="删除当前列">删除列</button>
+          ${btn('undo', 'toolbar.undo', 'toolbar.undoTitle')}
+          ${btn('redo', 'toolbar.redo', 'toolbar.redoTitle')}
+          ${btn('add-row', 'toolbar.insertRow', 'toolbar.insertRowTitle')}
+          ${btn('add-row-end', 'toolbar.appendRow', 'toolbar.appendRowTitle')}
+          ${btn('dup-row', 'toolbar.duplicateRow', 'toolbar.duplicateRowTitle')}
+          ${btn('del-row', 'toolbar.deleteRow', 'toolbar.deleteRowTitle')}
+          ${btn('add-col', 'toolbar.insertCol', 'toolbar.insertColTitle')}
+          ${btn('add-col-end', 'toolbar.appendCol', 'toolbar.appendColTitle')}
+          ${btn('del-col', 'toolbar.deleteCol', 'toolbar.deleteColTitle')}
 
           <div style="display:inline-flex; align-items:center; margin-left:10px; gap:4px;">
-            <input type="text" id="search-input" placeholder="输入关键词实时过滤行..." style="width:160px;" />
+            <input type="text" id="search-input" placeholder="${esc(s['toolbar.searchPlaceholder'])}" style="width:160px;" />
           </div>
 
           <span id="info"></span>
@@ -175,11 +193,21 @@ export class SlkEditorProvider implements vscode.CustomTextEditorProvider {
 
         <div id="error-box"></div>
 
+        <script nonce="${nonce}">window.__SLK_LANG__=${JSON.stringify(locale)};window.__SLK_I18N__=${i18nJson};</script>
+        <script nonce="${nonce}" src="${opsUri}"></script>
         <script nonce="${nonce}" src="${scriptUri}"></script>
       </body>
       </html>
     `;
   }
+}
+
+function escapeHtml(value: any): string {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
 
 function getNonce() {

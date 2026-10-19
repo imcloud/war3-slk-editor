@@ -1,0 +1,6 @@
+{
+  "displayName": "WAR3 SLK 编辑器",
+  "description": "在 VS Code 中以表格方式查看和编辑 Warcraft III 的 .slk 文件，支持多行多列选择与中英文界面。",
+  "editor.displayName": "WAR3 SLK 编辑器",
+  "config.language.description": "界面语言。auto 跟随 VS Code 显示语言；zh 强制中文，en 强制英文。"
+}
