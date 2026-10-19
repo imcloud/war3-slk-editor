@@ -288,6 +288,62 @@
       check('Ctrl+C 复制为 TSV（不含表头行）', copied.indexOf('hfoo\t420\tFootman') === 0,
         JSON.stringify(copied.slice(0, 60)));
 
+      // ---- 行/列头右键：粘贴起点必须是第 1 列 / 第 1 行 ----
+      post({ type: 'load', data: { rows: grid, maxCols: 3 } });
+      await wait(80);
+
+      var rowNums = visibleRows().map(function (r) { return r.querySelector('.cell-num'); });
+      rowNums[1].dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await wait(10);
+      check('点击行号后活动格落在第 1 列',
+        document.getElementById('info').textContent.indexOf('row 2 col 1') !== -1,
+        document.getElementById('info').textContent);
+
+      rowNums[2].dispatchEvent(new MouseEvent('contextmenu', {
+        bubbles: true, cancelable: true, button: 2, clientX: 420, clientY: 260,
+      }));
+      await wait(10);
+      check('右键行号弹出菜单', document.getElementById('slk-context-menu').style.display === 'block');
+      check('右键行号后粘贴起点为第 3 行第 1 列',
+        document.getElementById('info').textContent.indexOf('row 3 col 1') !== -1,
+        document.getElementById('info').textContent);
+
+      document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await wait(10);
+
+      var dtRow = new DataTransfer();
+      dtRow.setData('text/plain', 'X\tY');
+      document.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dtRow, bubbles: true }));
+      await wait(300);
+      var msgRow = lastContentChanged();
+      check('行号右键粘贴从第 1 列开始',
+        !!msgRow && msgRow.rows[3][0] === 'X' && msgRow.rows[3][1] === 'Y',
+        msgRow ? JSON.stringify(msgRow.rows[3]) : 'no message');
+
+      post({ type: 'load', data: { rows: grid, maxCols: 3 } });
+      await wait(80);
+      var hcells = document.querySelectorAll('#header-row .cell');
+      hcells[1].dispatchEvent(new MouseEvent('contextmenu', {
+        bubbles: true, cancelable: true, button: 2, clientX: 520, clientY: 20,
+      }));
+      await wait(10);
+      check('右键列头弹出菜单', document.getElementById('slk-context-menu').style.display === 'block');
+      check('右键列头后粘贴起点为第 1 行第 2 列',
+        document.getElementById('info').textContent.indexOf('row 1 col 2') !== -1,
+        document.getElementById('info').textContent);
+
+      document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await wait(10);
+
+      var dtCol = new DataTransfer();
+      dtCol.setData('text/plain', 'Z');
+      document.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dtCol, bubbles: true }));
+      await wait(300);
+      var msgCol = lastContentChanged();
+      check('列头右键粘贴从第 1 行开始',
+        !!msgCol && msgCol.rows[1][1] === 'Z',
+        msgCol ? JSON.stringify(msgCol.rows[1]) : 'no message');
+
       check('未触发 JS 错误遮罩', document.getElementById('error-box').style.display !== 'block',
         document.getElementById('error-box').textContent);
 

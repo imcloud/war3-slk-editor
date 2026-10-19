@@ -474,6 +474,9 @@ window.addEventListener('error', function (ev) {
     sel.cols.clear();
     sel.range = null;
     sel.r = r;
+    // 行选择后把活动格定位到第一列，这样右键“粘贴”会从该行第 1 列开始
+    sel.c = 0;
+    sel.anchor = { r: r, c: 0 };
     refreshSelection();
   }
 
@@ -496,7 +499,10 @@ window.addEventListener('error', function (ev) {
     sel.mode = sel.cols.size ? 'col' : 'cell';
     sel.rows.clear();
     sel.range = null;
+    // 列选择后把活动格定位到第一行数据，右键“粘贴”会从该列顶部开始
+    sel.r = 1;
     sel.c = c;
+    sel.anchor = { r: 1, c: c };
     refreshSelection();
   }
 
@@ -1352,6 +1358,32 @@ window.addEventListener('error', function (ev) {
     });
   }
 
+  if (headerRow) {
+    headerRow.addEventListener('contextmenu', function (e) {
+      if (e.target.closest('.col-toggle-btn')) return;
+      var cell = e.target.closest('.cell');
+      if (!cell || cell.dataset.c === undefined) return;
+      var c = parseInt(cell.dataset.c, 10);
+      if (isNaN(c)) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+      commitEditing();
+
+      if (!(sel.mode === 'col' && sel.cols.has(c))) {
+        selectCol(c, {});
+      } else {
+        // 右键落在已选中的列上：保留多选，粘贴起点移到第 1 行
+        sel.c = c;
+        sel.r = 1;
+        sel.anchor = { r: 1, c: c };
+        refreshSelection();
+      }
+
+      showContextMenu(e.clientX, e.clientY);
+    });
+  }
+
   if (rowsLayer) {
     rowsLayer.addEventListener('mousedown', function (e) {
       if (e.button !== 0) return;
@@ -1487,9 +1519,11 @@ window.addEventListener('error', function (ev) {
     menuSeparator();
 
     if (sel.mode === 'row') {
+      menuItem(t('menu.insertRow'), function () { insertRow(1); });
       menuItem(t('menu.deleteRows'), deleteSelectionRows);
       menuItem(t('menu.duplicateRow'), fillDownOrDuplicate);
     } else if (sel.mode === 'col') {
+      menuItem(t('menu.insertCol'), function () { insertCol(1); });
       menuItem(t('menu.deleteCols'), deleteSelectionCols);
     } else {
       menuItem(t('menu.insertRow'), function () { insertRow(1); });
@@ -1523,8 +1557,16 @@ window.addEventListener('error', function (ev) {
 
       if (numCell && numCell.parentElement && numCell.parentElement.classList.contains('data-row')) {
         var rowIdx = parseInt(numCell.dataset.r, 10);
-        if (!isNaN(rowIdx) && !(sel.mode === 'row' && sel.rows.has(rowIdx))) {
-          selectRow(rowIdx, {});
+        if (!isNaN(rowIdx)) {
+          if (!(sel.mode === 'row' && sel.rows.has(rowIdx))) {
+            selectRow(rowIdx, {});
+          } else {
+            // 右键落在已选中的行上：保留多选，但把粘贴起点移到这一行第 1 列
+            sel.r = rowIdx;
+            sel.c = 0;
+            sel.anchor = { r: rowIdx, c: 0 };
+            refreshSelection();
+          }
         }
       } else if (cell) {
         var r = parseInt(cell.dataset.r, 10);
