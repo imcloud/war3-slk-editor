@@ -344,6 +344,27 @@
         !!msgCol && msgCol.rows[1][1] === 'Z',
         msgCol ? JSON.stringify(msgCol.rows[1]) : 'no message');
 
+      // ---- 右键 Duplicate Row 必须是插入整行副本，而不是向下覆盖 ----
+      post({ type: 'load', data: { rows: grid, maxCols: 3 } });
+      await wait(80);
+      var dupCell = cellEl(1, 0);
+      var dupRect = dupCell.getBoundingClientRect();
+      dupCell.dispatchEvent(new MouseEvent('contextmenu', {
+        bubbles: true, cancelable: true, button: 2,
+        clientX: dupRect.left + 8, clientY: dupRect.top + 8,
+      }));
+      await wait(10);
+      var dupItem = document.querySelector('#slk-context-menu [data-menu-key="duplicateRow"]');
+      check('单元格右键菜单包含 Duplicate Row', !!dupItem);
+      if (dupItem) dupItem.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await wait(300);
+      var msgDup = lastContentChanged();
+      check('右键 Duplicate Row 插入整行副本',
+        !!msgDup && msgDup.rows.length === 5 &&
+          msgDup.rows[2][0] === 'hfoo' && msgDup.rows[2][2] === 'Footman' &&
+          msgDup.rows[3][0] === 'hpea',
+        msgDup ? JSON.stringify(msgDup.rows) : 'no message');
+
       check('未触发 JS 错误遮罩', document.getElementById('error-box').style.display !== 'block',
         document.getElementById('error-box').textContent);
 

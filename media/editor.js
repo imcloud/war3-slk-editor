@@ -1482,18 +1482,17 @@ window.addEventListener('error', function (ev) {
     contextMenu.innerHTML = '';
   }
 
-  function menuItem(label, action, disabled) {
+  function menuItem(key, label, action) {
     var el = document.createElement('div');
-    el.className = 'slk-menu-item' + (disabled ? ' disabled' : '');
+    el.className = 'slk-menu-item';
+    el.dataset.menuKey = key;
     el.textContent = label;
-    if (!disabled) {
-      el.addEventListener('mousedown', function (e) { e.stopPropagation(); });
-      el.addEventListener('click', function (e) {
-        e.stopPropagation();
-        hideContextMenu();
-        action();
-      });
-    }
+    el.addEventListener('mousedown', function (e) { e.stopPropagation(); });
+    el.addEventListener('click', function (e) {
+      e.stopPropagation();
+      hideContextMenu();
+      action();
+    });
     contextMenu.appendChild(el);
   }
 
@@ -1506,32 +1505,39 @@ window.addEventListener('error', function (ev) {
   function showContextMenu(x, y) {
     contextMenu.innerHTML = '';
 
-    menuItem(t('menu.copy'), doCopy);
-    menuItem(t('menu.cut'), doCut);
-    menuItem(t('menu.paste'), async function () {
+    menuItem('copy', t('menu.copy'), doCopy);
+    menuItem('cut', t('menu.cut'), doCut);
+    menuItem('paste', t('menu.paste'), async function () {
       var pr = sel.r;
       var pc = sel.c;
       var text = await clipboardRead();
       if (text !== null && text !== '') applyPasteText(text, pr, pc);
     });
-    menuItem(t('menu.clear'), function () { clearContents(); });
+    menuItem('clear', t('menu.clear'), function () { clearContents(); });
 
     menuSeparator();
 
     if (sel.mode === 'row') {
-      menuItem(t('menu.insertRow'), function () { insertRow(1); });
-      menuItem(t('menu.deleteRows'), deleteSelectionRows);
-      menuItem(t('menu.duplicateRow'), fillDownOrDuplicate);
+      menuItem('insertRow', t('menu.insertRow'), function () { insertRow(1); });
+      // 与工具栏“复制行”保持一致：插入一整行副本，而不是向下覆盖
+      menuItem('duplicateRow', t('menu.duplicateRow'), function () {
+        duplicateRows(Array.from(sel.rows));
+      });
+      menuItem('deleteRows', t('menu.deleteRows'), deleteSelectionRows);
     } else if (sel.mode === 'col') {
-      menuItem(t('menu.insertCol'), function () { insertCol(1); });
-      menuItem(t('menu.deleteCols'), deleteSelectionCols);
+      menuItem('insertCol', t('menu.insertCol'), function () { insertCol(1); });
+      menuItem('deleteCols', t('menu.deleteCols'), deleteSelectionCols);
     } else {
-      menuItem(t('menu.insertRow'), function () { insertRow(1); });
-      menuItem(t('menu.duplicateRow'), fillDownOrDuplicate);
+      menuItem('insertRow', t('menu.insertRow'), function () { insertRow(1); });
+      menuItem('duplicateRow', t('menu.duplicateRow'), function () { duplicateRows([sel.r]); });
+      var rg = sel.range;
+      if (rg && rg.r2 > rg.r1) {
+        menuItem('fillDown', t('menu.fillDown'), fillDownOrDuplicate);
+      }
     }
 
     menuSeparator();
-    menuItem(t('menu.selectAll'), selectAll);
+    menuItem('selectAll', t('menu.selectAll'), selectAll);
 
     contextMenu.style.display = 'block';
     var rect = contextMenu.getBoundingClientRect();
