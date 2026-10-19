@@ -86,6 +86,25 @@
       function cellEl(r, c) {
         return document.querySelector('#rows-layer .cell[data-r="' + r + '"][data-c="' + c + '"]');
       }
+      function fireMouse(target, type, x, y, buttons, extra) {
+        var init = { bubbles: true, button: 0, buttons: buttons, clientX: x, clientY: y };
+        if (extra) for (var k in extra) init[k] = extra[k];
+        target.dispatchEvent(new MouseEvent(type, init));
+      }
+      async function dragBetween(fromEl, toEl, opts) {
+        opts = opts || {};
+        var a = fromEl.getBoundingClientRect();
+        var b = toEl.getBoundingClientRect();
+        var mods = opts.mods || {};
+        fireMouse(fromEl, 'mousedown', a.left + 8, a.top + 8, 1, mods);
+        fireMouse(document, 'mousemove', a.left + 14, a.top + 14, 1, mods);
+        fireMouse(document, 'mousemove', b.left + 8, b.top + 8, 1, mods);
+        fireMouse(document, 'mouseup', b.left + 8, b.top + 8, 0, mods);
+        await wait(20);
+        // 真实浏览器在 mouseup 后还会派发一次 click，这里模拟并确认它被吞掉
+        fireMouse(toEl, 'click', b.left + 8, b.top + 8, 0, mods);
+        await wait(10);
+      }
       function post(msg) { window.postMessage(msg, '*'); }
       function lastContentChanged() {
         for (var i = window.__messages.length - 1; i >= 0; i--) {
@@ -107,6 +126,37 @@
       check('表头渲染 3 列', document.querySelectorAll('#header-row .cell').length === 3);
       check('数据行渲染 3 行', visibleRows().length === 3, 'rendered=' + visibleRows().length);
       check('首行首格内容正确', cellEl(1, 0) && cellEl(1, 0).textContent === 'hfoo');
+
+      // ---- 鼠标拖动框选 ----
+      await dragBetween(cellEl(1, 0), cellEl(3, 1));
+      check('拖动框选 3x2', document.querySelectorAll('#rows-layer .cell.cell-range').length === 6,
+        'count=' + document.querySelectorAll('#rows-layer .cell.cell-range').length);
+      check('拖动结束不残留 dragging 状态', !document.body.classList.contains('slk-dragging'));
+
+      var visibleForDrag = visibleRows();
+      await dragBetween(
+        visibleForDrag[0].querySelector('.cell-num'),
+        visibleForDrag[1].querySelector('.cell-num')
+      );
+      check('拖动行号选 2 行', document.querySelectorAll('#rows-layer .cell-num.row-selected').length === 2,
+        'count=' + document.querySelectorAll('#rows-layer .cell-num.row-selected').length);
+
+      await dragBetween(
+        visibleForDrag[1].querySelector('.cell-num'),
+        visibleForDrag[2].querySelector('.cell-num'),
+        { mods: { ctrlKey: true } }
+      );
+      check('Ctrl+拖动行号加选到 3 行', document.querySelectorAll('#rows-layer .cell-num.row-selected').length === 3,
+        'count=' + document.querySelectorAll('#rows-layer .cell-num.row-selected').length);
+
+      var headerForDrag = document.querySelectorAll('#header-row .cell');
+      await dragBetween(headerForDrag[0], headerForDrag[1]);
+      check('拖动列头选 2 列', document.querySelectorAll('#header-row .cell.col-selected').length === 2,
+        'count=' + document.querySelectorAll('#header-row .cell.col-selected').length);
+
+      // 复位成单格，后续用例从干净状态开始
+      cellEl(1, 0).dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await wait(20);
 
       // ---- 单元格 Shift 矩形选择 ----
       cellEl(1, 0).dispatchEvent(new MouseEvent('click', { bubbles: true }));

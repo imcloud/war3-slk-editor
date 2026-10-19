@@ -8,7 +8,7 @@
 
 - 表格化显示 `.slk`，虚拟滚动，大文件也不卡
 - 单击选中、双击编辑；直接键入即可开始编辑
-- **多选**：Ctrl+点击加选行/列，Shift+点击连选；单元格 Shift+点击画矩形选区
+- **多选**：按住左键拖动框选矩形区域；Ctrl+点击加选行/列，Shift+点击连选；行号、列头同样可拖动连选
 - **Delete 删除选中行/列**，Backspace 只清空内容
 - 矩形区域复制 / 剪切 / 粘贴，和 Excel 双向兼容 TSV
 - Ctrl+D 向下填充（整行选中时是复制行）
@@ -22,6 +22,7 @@
 
 | 操作 | 快捷键 |
 | --- | --- |
+| 框选矩形区域 | 按住左键拖动 |
 | 移动活动单元格 | 方向键（按住 Shift 扩展选区） |
 | 编辑当前单元格 | F2、双击、或直接键入 |
 | 提交并下移 / 右移 | Enter / Tab |
@@ -38,7 +39,8 @@
 
 - 点行号（最左侧 `#` 列）选中一行；**Ctrl+点击**其他行号可加选；**Shift+点击**连选一个范围。
 - 点列头选中一列；Ctrl / Shift 同理。
-- 在数据格上 **Shift+点击** 可以从上一个锚点画矩形选区。
+- 在数据格上按住左键**拖动**即可框选矩形区域；拖到表格边缘会自动滚动。
+- 行号、列头也能按住拖动连选；按住 Ctrl 拖动会在已有选区上追加。
 - 选中行/列后按 **Delete** 会删除表格结构；在单元格选区里按 Delete 只清空内容，不会删行删列。
 - 整行/整列复制会包含各自的全部数据；`Ctrl+A` 只选数据行，不含第 1 行字段名，避免粘贴回去时多出一行。
 
@@ -69,7 +71,7 @@
 - 保存后用 `git diff` 检查输出是否符合预期
 - 如果发现语义丢失、格式错乱、字段错位等问题，请提交 Issue
 
-> 1.2.0 起，解析/序列化逻辑没有做任何行为改动，并新增 `tests/parser-contract.test.js` 锁定现有输出：以后若有人改动解析器导致语义变化，测试会直接失败。
+> 1.2.x 起，解析/序列化逻辑没有做任何行为改动，并新增 `tests/parser-contract.test.js` 锁定现有输出：以后若有人改动解析器导致语义变化，测试会直接失败。
 
 ## 提交问题
 
@@ -101,9 +103,10 @@ UI 回归：用 Chrome/Edge headless 打开 `tests/webview-harness.html`，页�
 
 ## English (short)
 
-A spreadsheet-style editor for Warcraft III `.slk` files, for both 1.29.2-era MPQ extractions and Reforged CASC extractions. Version 1.2.0 adds:
+A spreadsheet-style editor for Warcraft III `.slk` files, for both 1.29.2-era MPQ extractions and Reforged CASC extractions. 1.2.x adds:
 
-- Ctrl/Shift multi-select for rows and columns, rectangular cell selection
+- Drag with the left mouse button to select a rectangular range (auto-scrolls at the edges)
+- Ctrl/Shift multi-select for rows and columns, plus drag-select on row/column headers
 - Delete removes selected rows/columns; Backspace clears contents
 - Range copy/cut/paste with Excel-compatible TSV, Ctrl+D fill-down
 - Undo/redo (60 steps) and full keyboard navigation

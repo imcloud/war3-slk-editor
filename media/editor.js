@@ -1148,6 +1148,7 @@ window.addEventListener('error', function (ev) {
   // 表头：列选择 + 折叠
   if (headerRow) {
     headerRow.addEventListener('click', function (e) {
+      if (suppressClick) { suppressClick = false; return; }
       if (e.target.closest('.col-toggle-btn')) return;
       var cell = e.target.closest('.cell');
       if (!cell || cell.dataset.c === undefined) return;
@@ -1160,6 +1161,7 @@ window.addEventListener('error', function (ev) {
   // 行号：行选择；单元格：选中 / 双击编辑
   if (rowsLayer) {
     rowsLayer.addEventListener('click', function (e) {
+      if (suppressClick) { suppressClick = false; return; }
       if (e.target.classList && e.target.classList.contains('cell-editor')) return;
 
       var numCell = e.target.closest('.cell-num');
@@ -1189,6 +1191,227 @@ window.addEventListener('error', function (ev) {
       beginEditAt(r, c);
     });
   }
+
+  // ================= 鼠标拖动多选 =================
+
+  var pendingDrag = null;
+  var activeDrag = null;
+  var dragPointer = { x: 0, y: 0 };
+  var dragRaf = null;
+  var suppressClick = false;
+
+  function markDragSuppressClick() {
+    suppressClick = true;
+    // 拖拽结束浏览器仍会派发一次 click，消费掉即可；这里兜底防止一直吞点击
+    setTimeout(function () { suppressClick = false; }, 400);
+  }
+
+  function headerHeight() {
+    var h = headerRow ? headerRow.getBoundingClientRect().height : 0;
+    return h || ROW_HEIGHT;
+  }
+
+  function rowAtY(y) {
+    if (!filteredIndices.length) return 1;
+    var rect = bodyContainer.getBoundingClientRect();
+    var contentY = bodyContainer.scrollTop + (y - rect.top) - headerHeight();
+    var vi = Math.floor(contentY / ROW_HEIGHT);
+    if (vi < 0) vi = 0;
+    if (vi >= filteredIndices.length) vi = filteredIndices.length - 1;
+    return filteredIndices[vi];
+  }
+
+  function colAtX(x) {
+    var rect = bodyContainer.getBoundingClientRect();
+    var contentX = bodyContainer.scrollLeft + (x - rect.left) - numWidth();
+    if (contentX <= 0) return 0;
+    var acc = 0;
+    for (var c = 0; c < maxCols; c++) {
+      acc += cellWidth(c);
+      if (contentX < acc) return c;
+    }
+    return Math.max(0, maxCols - 1);
+  }
+
+  function applyDragAt(x, y) {
+    if (!activeDrag) return;
+    if (activeDrag.kind === 'cell') {
+      var r = rowAtY(y);
+      var c = colAtX(x);
+      sel.range = Ops.normalizeRange({ r: activeDrag.anchorR, c: activeDrag.anchorC }, { r: r, c: c });
+      sel.r = r;
+      sel.c = c;
+      sel.mode = 'cell';
+      refreshSelection();
+      return;
+    }
+
+    if (activeDrag.kind === 'row') {
+      var rr = rowAtY(y);
+      var lo = Math.min(activeDrag.anchorR, rr);
+      var hi = Math.max(activeDrag.anchorR, rr);
+      var nextRows = new Set(activeDrag.base);
+      for (var i = lo; i <= hi; i++) nextRows.add(i);
+      sel.rows = nextRows;
+      sel.mode = 'row';
+      sel.r = rr;
+      sel.range = null;
+      refreshSelection();
+      return;
+    }
+
+    var cc = colAtX(x);
+    var clo = Math.min(activeDrag.anchorC, cc);
+    var chi = Math.max(activeDrag.anchorC, cc);
+    var nextCols = new Set(activeDrag.base);
+    for (var j = clo; j <= chi; j++) nextCols.add(j);
+    sel.cols = nextCols;
+    sel.mode = 'col';
+    sel.c = cc;
+    sel.range = null;
+    refreshSelection();
+  }
+
+  function dragScrollStep() {
+    if (!activeDrag) { dragRaf = null; return; }
+    var rect = bodyContainer.getBoundingClientRect();
+    var dx = 0;
+    var dy = 0;
+    if (dragPointer.y < rect.top + 24) dy = -1;
+    else if (dragPointer.y > rect.bottom - 24) dy = 1;
+    if (dragPointer.x < rect.left + numWidth() + 24) dx = -1;
+    else if (dragPointer.x > rect.right - 24) dx = 1;
+
+    if (!dx && !dy) { dragRaf = null; return; }
+
+    if (dy) bodyContainer.scrollTop += dy * 18;
+    if (dx) bodyContainer.scrollLeft += dx * 18;
+    applyDragAt(dragPointer.x, dragPointer.y);
+    dragRaf = window.requestAnimationFrame(dragScrollStep);
+  }
+
+  function ensureDragScroll() {
+    if (!activeDrag || dragRaf) return;
+    var rect = bodyContainer.getBoundingClientRect();
+    var nearY = dragPointer.y < rect.top + 24 || dragPointer.y > rect.bottom - 24;
+    var nearX = dragPointer.x < rect.left + numWidth() + 24 || dragPointer.x > rect.right - 24;
+    if (nearY || nearX) dragRaf = window.requestAnimationFrame(dragScrollStep);
+  }
+
+  function stopDrag() {
+    activeDrag = null;
+    pendingDrag = null;
+    if (dragRaf) {
+      window.cancelAnimationFrame(dragRaf);
+      dragRaf = null;
+    }
+    document.body.classList.remove('slk-dragging');
+  }
+
+  function beginDrag(kind, r, c, ctrl) {
+    if (kind === 'cell') {
+      selectCell(r, c, {});
+      activeDrag = { kind: 'cell', anchorR: r, anchorC: c, base: null };
+    } else if (kind === 'row') {
+      var baseRows = (ctrl && sel.mode === 'row') ? new Set(sel.rows) : new Set();
+      baseRows.add(r);
+      sel.mode = 'row';
+      sel.rows = new Set(baseRows);
+      sel.cols.clear();
+      sel.range = null;
+      sel.r = r;
+      refreshSelection();
+      activeDrag = { kind: 'row', anchorR: r, anchorC: 0, base: baseRows };
+    } else {
+      var baseCols = (ctrl && sel.mode === 'col') ? new Set(sel.cols) : new Set();
+      baseCols.add(c);
+      sel.mode = 'col';
+      sel.cols = new Set(baseCols);
+      sel.rows.clear();
+      sel.range = null;
+      sel.c = c;
+      refreshSelection();
+      activeDrag = { kind: 'col', anchorR: 0, anchorC: c, base: baseCols };
+    }
+
+    document.body.classList.add('slk-dragging');
+    markDragSuppressClick();
+  }
+
+  if (headerRow) {
+    headerRow.addEventListener('mousedown', function (e) {
+      if (e.button !== 0) return;
+      if (e.target.closest('.col-toggle-btn')) return;
+      var cell = e.target.closest('.cell');
+      if (!cell || cell.dataset.c === undefined) return;
+      var c = parseInt(cell.dataset.c, 10);
+      if (isNaN(c)) return;
+      pendingDrag = { kind: 'col', c: c, x: e.clientX, y: e.clientY, ctrl: e.ctrlKey || e.metaKey };
+      e.preventDefault();
+    });
+  }
+
+  if (rowsLayer) {
+    rowsLayer.addEventListener('mousedown', function (e) {
+      if (e.button !== 0) return;
+      if (e.target.closest('input')) return;
+      if (e.target.classList && e.target.classList.contains('cell-editor')) return;
+
+      var numCell = e.target.closest('.cell-num');
+      if (numCell && numCell.parentElement && numCell.parentElement.classList.contains('data-row')) {
+        var rowIdx = parseInt(numCell.dataset.r, 10);
+        if (!isNaN(rowIdx)) {
+          pendingDrag = { kind: 'row', r: rowIdx, x: e.clientX, y: e.clientY, ctrl: e.ctrlKey || e.metaKey };
+          e.preventDefault();
+        }
+        return;
+      }
+
+      var cell = e.target.closest('.cell');
+      if (!cell) return;
+      var r = parseInt(cell.dataset.r, 10);
+      var c = parseInt(cell.dataset.c, 10);
+      if (isNaN(r) || isNaN(c)) return;
+      pendingDrag = { kind: 'cell', r: r, c: c, x: e.clientX, y: e.clientY, ctrl: e.ctrlKey || e.metaKey };
+      e.preventDefault();
+    });
+  }
+
+  document.addEventListener('mousemove', function (e) {
+    if (!pendingDrag && !activeDrag) return;
+    if (e.buttons === 0) {
+      // 鼠标在窗口外松开等情况下收不到 mouseup，避免留下"幽灵拖拽"
+      stopDrag();
+      return;
+    }
+    dragPointer.x = e.clientX;
+    dragPointer.y = e.clientY;
+
+    if (!activeDrag && pendingDrag) {
+      var dist = Math.abs(e.clientX - pendingDrag.x) + Math.abs(e.clientY - pendingDrag.y);
+      if (dist < 4) return;
+      if (pendingDrag.kind === 'cell') beginDrag('cell', pendingDrag.r, pendingDrag.c, pendingDrag.ctrl);
+      else if (pendingDrag.kind === 'row') beginDrag('row', pendingDrag.r, 0, pendingDrag.ctrl);
+      else beginDrag('col', 0, pendingDrag.c, pendingDrag.ctrl);
+      pendingDrag = null;
+    }
+
+    if (activeDrag) {
+      applyDragAt(e.clientX, e.clientY);
+      ensureDragScroll();
+    }
+  });
+
+  document.addEventListener('mouseup', function () {
+    if (!activeDrag && !pendingDrag) return;
+    var wasDragging = !!activeDrag;
+    stopDrag();
+    if (wasDragging) markDragSuppressClick();
+  });
+
+  window.addEventListener('blur', function () {
+    if (pendingDrag || activeDrag) stopDrag();
+  });
 
   // 原生 copy/cut/paste（焦点不在输入框时）
   document.addEventListener('copy', function (e) {

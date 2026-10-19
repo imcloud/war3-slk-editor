@@ -244,3 +244,10 @@ html, body, #body-container { overflow-anchor: none; }
   margin: 4px 0;
   background: var(--vscode-menu-border, #454545);
 }
+
+/* 拖拽框选时统一光标，避免拖到文字上变成 I 形 */
+body.slk-dragging,
+body.slk-dragging * {
+  cursor: cell !important;
+  user-select: none;
+}

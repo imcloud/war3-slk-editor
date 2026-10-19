@@ -5,3 +5,5 @@ out/*
 node_modules
 node_modules/*
 *.vsix
+tests/harness-out.html
+tests/harness-err.txt
